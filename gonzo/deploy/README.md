@@ -1,0 +1,30 @@
+# `deploy` — deploy và rollback phải reproducible bằng script
+
+Quyết định chi phối: **D-18** (cutover đảo được), **D-19** (production chỉ chạy release
+tag), **D-21** (bus factor giảm bằng hệ thống, không bằng người). Workstream ⑦.
+
+Thư mục script + config, không phải package Python — cố ý không có `__init__.py`.
+
+## Nội dung dự kiến
+
+- launchd plist cho 4 process + KeepAlive, và **health-check script nhẹ** (Hermes watchdog
+  chỉ có systemd — macOS không có; theo dõi 1 tuần ở Gate 5).
+- Backup/restore Kanban: SQLite online backup API hoặc `VACUUM INTO` — **không** copy file DB
+  đang chạy. ≥1 bản off-device, có retention, **restore test tự động**.
+- Script deploy + rollback. **Rollback drill phải pass ở Gate 6** trước khi cutover.
+- Routing flag của D-18: một thao tác kéo toàn bộ task về legacy runtime.
+
+## Bất biến
+
+- **Production chỉ chạy release tag/commit của fork — không chạy working tree** (D-19).
+- **Không patch tay ngoài repo.** Mọi sửa đổi là một commit có test. Không có ngoại lệ
+  "sửa nhanh trên máy".
+- **Cutover là thao tác đảo được**: ngừng giao task mới cho hệ cũ, không xoá, không tắt.
+  Legacy giữ chạy thêm 4 tuần. Retire chỉ sau 4 tuần ổn **và** một lần restore/rollback drill
+  thành công.
+- **Rollback ngay lập tức, không họp**, khi có: truth-integrity breach · mất task/state ·
+  approval hoặc retrieval gate bị bypass. Kéo flag trước, điều tra sau.
+- **Không secret trong repo.** Lark app secret, token, mapping `lark_user_id → role/domain`
+  sống ở runtime config ngoài git.
+
+Trạng thái: **stub.**
