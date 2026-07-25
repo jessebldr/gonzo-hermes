@@ -3,7 +3,7 @@ id: "0002"
 title: Repo topology — hai repo hay ba
 type: grilling
 status: closed
-assignee: "Khánh"
+assignee: "tech-lead"
 blocked_by: []
 ---
 

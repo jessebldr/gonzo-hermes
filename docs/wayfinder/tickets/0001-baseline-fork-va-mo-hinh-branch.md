@@ -3,7 +3,7 @@ id: "0001"
 title: Baseline fork và mô hình branch
 type: grilling
 status: closed
-assignee: "Khánh"
+assignee: "tech-lead"
 blocked_by: []
 ---
 

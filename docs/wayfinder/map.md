@@ -45,6 +45,11 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
 - [Repo topology — hai repo hay ba](tickets/0002-repo-topology-hai-repo-hay-ba.md) —
   hai repo, không có `gonzo-runtime`; fork **là** runtime chính thức (D-19), code công ty
   nằm dưới `gonzo/` để upstream không conflict được.
+- [Chọn và freeze 18 case truth-integrity](tickets/0012-chon-va-freeze-18-case-truth-integrity.md) —
+  21 case đóng băng ở `gonzo/tests/truth_integrity/cases.yaml` (digest ở `FREEZE.md`); case
+  khai báo *hình dạng vault* chứ không trỏ file, nên suite không vỡ khi vault nở lên ~690
+  note; 34 test cấu trúc chạy được hôm nay, trong đó 21 wire check nối thẳng vào văn bản
+  governance nên sửa luật vault mà quên sửa case thì suite đỏ.
 
 ## Fog
 
