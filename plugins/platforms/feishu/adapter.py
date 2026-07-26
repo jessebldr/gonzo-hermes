@@ -3100,7 +3100,10 @@ class FeishuAdapter(BasePlatformAdapter):
             channel_prompt=self._resolve_channel_prompt(chat_id),
             timestamp=datetime.now(),
         )
-        logger.info("[Feishu] Routing card action %r from %s in %s as synthetic command", action_tag, open_id, chat_id)
+        logger.info(
+            "[Feishu] Routing card action %r from %s in %s (topic=%s) as a synthetic turn",
+            action_tag, open_id, chat_id, source.thread_id or "-",
+        )
         await self._handle_message_with_guards(synthetic_event)
 
     # =========================================================================

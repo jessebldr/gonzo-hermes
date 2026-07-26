@@ -2,8 +2,8 @@
 id: "0017"
 title: Vá adapter Feishu — ba lỗi trên đường card
 type: task
-status: open
-assignee: ""
+status: closed
+assignee: "tech-lead"
 blocked_by: []
 ---
 
@@ -35,3 +35,32 @@ commit một test, và **thêm dòng vào bảng "Upstream files đã sửa"** t
 
 Test âm bắt buộc: bấm nút → agent nhận được đúng `value` của **nút đó** (không phải nút đầu),
 và trả lời về **đúng topic** chứa card.
+
+## Resolution
+
+**Cả ba lỗi đã vá và đã xác minh trên bot thật.** Ba commit riêng, mỗi cái một test.
+
+| Lỗi | Vá | Commit |
+|---|---|---|
+| `message_id` = card token `c-…` | Dùng `context.open_message_id`; uuid làm fallback (hỏng cục bộ, không hỏng ở biên API) | `5843893dd` |
+| `thread_id=None` | `_resolve_thread_id_for_message()` — tra message rồi cache; topic của một card không đổi | `5843893dd` |
+| `/card` không ai đăng ký | Không phát slash command nữa; click tới agent như một lượt bình thường, `value` giữ nguyên | `691efb94c` |
+
+**Xác minh trên Lark thật** (bấm nút `Creative 2`):
+
+| Kiểm tra | Trước | Sau |
+|---|---|---|
+| Lỗi `99992354` | Mọi send fail, kể cả fallback | **0 lần** |
+| `thread_id` | `None` | `omt_190064f568cf194b` — đúng topic |
+| Bot trả lời | Câm | 249 ký tự |
+| Định vị item | Payload bị vứt | `{"item": "creative-2"}` — đúng nút |
+
+**501 test Feishu xanh, ruff sạch.** Bảng "Upstream files đã sửa" trong `gonzo/README.md`
+lên 3 dòng — thêm adapter và một test upstream (sửa để pin *ý định* thay vì pin tiền tố slash).
+
+## Quan sát kèm theo, không phải lỗi
+
+Một cú click tốn `tool_turns=10, api_calls=11/90` — agent đi đọc ADR, đọc file test,
+`session_search`, grep. Đúng nhưng lãng phí. Ở quy mô team đây là vấn đề chi phí, và nó nối
+vào [Chỗ ở của cost-cap enforcement](0019-cho-o-cua-cost-cap-enforcement.md) và
+[Phạm vi của session_search](0018-pham-vi-cua-session-search.md).
