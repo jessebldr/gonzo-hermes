@@ -50,3 +50,4 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | File | Vì sao | Commit |
 |---|---|---|
 | `pyproject.toml` | Đăng ký package `gonzo` vào `packages.find`, thêm `gonzo/tests` vào `testpaths` | khung ban đầu |
+| `plugins/platforms/feishu/adapter.py` | Card action: dùng `context.open_message_id` thay cho card token (`c-…`), và resolve `thread_id` của topic. Bắt buộc vì Lark Topic-mode không có định vị theo message — [ADR 0002](../docs/architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md) | `test_feishu_card_action_addressing.py` |

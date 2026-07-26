@@ -1493,6 +1493,10 @@ class FeishuAdapter(BasePlatformAdapter):
         self._sent_message_ids_to_chat: Dict[str, str] = {}  # message_id → chat_id (for reaction routing)
         self._sent_message_id_order: List[str] = []  # LRU order for _sent_message_ids_to_chat
         self._chat_info_cache: Dict[str, Dict[str, Any]] = {}
+        # message_id → thread_id (or None). A card's topic never changes, so
+        # this is cached indefinitely; the map is bounded by how many distinct
+        # cards get clicked. See _resolve_thread_id_for_message.
+        self._message_thread_cache: Dict[str, Optional[str]] = {}
         self._message_text_cache: "OrderedDict[str, Optional[str]]" = OrderedDict()
         self._app_lock_identity: Optional[str] = None
         self._text_batch_state = FeishuBatchState()
@@ -3006,6 +3010,35 @@ class FeishuAdapter(BasePlatformAdapter):
         self._card_action_tokens[token] = now
         return False
 
+    async def _resolve_thread_id_for_message(self, message_id: str) -> Optional[str]:
+        """Return the topic (``omt_…``) a message belongs to, or None.
+
+        Card action callbacks carry ``open_message_id`` but not the topic, and
+        in Lark Topic-mode the topic is the only addressing unit that exists —
+        a reply inside a topic reports ``parent_id == root_id``. Without this
+        lookup the agent cannot answer back into the topic the card is in.
+        """
+        if not message_id or not self._client:
+            return None
+        if message_id in self._message_thread_cache:
+            return self._message_thread_cache[message_id]
+
+        thread_id: Optional[str] = None
+        try:
+            request = self._build_get_message_request(message_id)
+            response = await self._run_blocking(self._client.im.v1.message.get, request)
+            if response and getattr(response, "success", lambda: False)():
+                items = getattr(getattr(response, "data", None), "items", None) or []
+                if items:
+                    thread_id = str(getattr(items[0], "thread_id", "") or "") or None
+        except Exception:
+            logger.debug(
+                "[Feishu] Could not resolve thread for message %s", message_id, exc_info=True
+            )
+
+        self._message_thread_cache[message_id] = thread_id
+        return thread_id
+
     async def _handle_card_action_event(self, data: Any) -> None:
         """Route Feishu interactive card button clicks as synthetic COMMAND events."""
         event = getattr(data, "event", None)
@@ -3016,6 +3049,11 @@ class FeishuAdapter(BasePlatformAdapter):
 
         context = getattr(event, "context", None)
         chat_id = str(getattr(context, "open_chat_id", "") or "")
+        # The card's own message. NOT `token` — that is a `c-…` card id, and
+        # Lark rejects it (99992354) everywhere an `om_…` is expected, which
+        # previously failed the reply AND the plain-text fallback, leaving the
+        # bot silent instead of degrading.
+        card_message_id = str(getattr(context, "open_message_id", "") or "")
         operator = getattr(event, "operator", None)
         open_id = str(getattr(operator, "open_id", "") or "")
         if not chat_id or not open_id:
@@ -3042,7 +3080,7 @@ class FeishuAdapter(BasePlatformAdapter):
             chat_type=self._resolve_source_chat_type(chat_info=chat_info, event_chat_type="group"),
             user_id=sender_profile["user_id"],
             user_name=sender_profile["user_name"],
-            thread_id=None,
+            thread_id=await self._resolve_thread_id_for_message(card_message_id),
             user_id_alt=sender_profile["user_id_alt"],
         )
         synthetic_event = MessageEvent(
@@ -3050,7 +3088,9 @@ class FeishuAdapter(BasePlatformAdapter):
             message_type=MessageType.COMMAND,
             source=source,
             raw_message=data,
-            message_id=token or str(uuid.uuid4()),
+            # A random uuid is a better fallback than `token`: it is obviously
+            # not a Lark id, so it fails locally instead of at the API boundary.
+            message_id=card_message_id or str(uuid.uuid4()),
             channel_prompt=self._resolve_channel_prompt(chat_id),
             timestamp=datetime.now(),
         )
