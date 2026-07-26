@@ -43,3 +43,29 @@ song và truth suite chưa chạy thật (chỉ từ Gate 3), nên vá bây gi�
 nào bắt nếu vá sai.
 
 Cần chốt: (b) có đáng làm không, và nếu có thì phạm vi theo **người**, theo **topic**, hay cả hai.
+
+## Cập nhật 2026-07-26 — hoãn có điều kiện, kèm mốc kích hoạt chính xác
+
+Đo lại trọng số sau khi đọc kỹ hơn. Ba kịch bản **không** ngang nhau:
+
+| Kịch bản | Hại thật | Khi nào |
+|---|---|---|
+| Topic 2 đọc topic 1 | **Thấp** — cả hai là không gian chung, ai trong group cũng cuộn lên đọc được. Agent nhắc lại không lộ gì mới | ngay |
+| **Group đọc nội dung DM** | **Thật, và im lặng** — người ta DM vì tưởng riêng tư | lần đầu có người thứ hai dùng bot |
+| Profile A đọc kho profile B | Chặn Gate 2 ⑥ | ở Gate 2 |
+
+Lần trước tôi nhấn vào dòng đầu, mà đó đúng là chuyện nhỏ. Cái đáng lo là dòng giữa.
+
+**Hôm nay rủi ro bằng không theo cấu trúc:** `FEISHU_ALLOW_ALL_USERS=false` và
+`FEISHU_ALLOWED_USERS` chỉ có một người → không ai khác gọi được bot, kể cả DM. Không có DM
+của người khác để mà rò.
+
+> **MỐC KÍCH HOẠT:** khi thêm người thứ hai vào `FEISHU_ALLOWED_USERS`, phải chốt (a) hoặc
+> (b) **trước** đó. Đó là dòng duy nhất trong `.env` mở cửa cho rủi ro này.
+
+**Chi phí của (b) cao hơn ước tính ban đầu.** `search_messages` có sẵn `source_filter` nhưng
+nó lọc theo `sessions.source`, mà cột đó chỉ chứa tên nền tảng (`cli`, `feishu`) — quá thô.
+Lọc theo người phải thêm tham số vào `search_messages` + `_search_messages_impl` + nhánh
+trigram + nhánh CJK — **bốn chỗ trong `hermes_state.py`**, file lõi 8000+ dòng, đắt hơn
+adapter nhiều. Cộng thêm: cùng một người đang tồn tại dưới **hai** `user_id`
+(`1d13c1ff` tenant-scoped và `ou_d8ae…` open_id), nên bộ lọc phải xử lý cả hai dạng.
