@@ -50,4 +50,5 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | File | Vì sao | Commit |
 |---|---|---|
 | `pyproject.toml` | Đăng ký package `gonzo` vào `packages.find`, thêm `gonzo/tests` vào `testpaths` | khung ban đầu |
-| `plugins/platforms/feishu/adapter.py` | Card action: dùng `context.open_message_id` thay cho card token (`c-…`), và resolve `thread_id` của topic. Bắt buộc vì Lark Topic-mode không có định vị theo message — [ADR 0002](../docs/architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md) | `test_feishu_card_action_addressing.py` |
+| `plugins/platforms/feishu/adapter.py` | Card action: dùng `context.open_message_id` thay cho card token (`c-…`), resolve `thread_id` của topic, và không phát `/card` (lệnh không ai đăng ký). Bắt buộc vì Lark Topic-mode không có định vị theo message — [ADR 0002](../docs/architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md) | `test_feishu_card_action_addressing.py` |
+| `tests/gateway/test_feishu_approval_buttons.py` | Một test pin hành vi `/card` cũ; sửa để pin **ý định** (click tới được agent, `value` sống sót) thay vì tiền tố slash | chính nó |

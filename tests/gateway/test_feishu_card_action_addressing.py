@@ -134,6 +134,30 @@ async def test_button_value_survives_intact():
 
 
 @pytest.mark.asyncio
+async def test_click_is_not_dispatched_as_an_unregistered_slash_command():
+    """A click must reach the agent, not die as an unknown command.
+
+    The handler built ``/card button {...}``, but ``card`` is not in
+    GATEWAY_KNOWN_COMMANDS, so the gateway answered
+    "Unrecognized slash command /card" and threw the payload away — the whole
+    point of the card path lost at the last step.
+
+    Asserted against the live registry rather than against a chosen fix, so
+    this stays honest if ``/card`` is ever registered upstream.
+    """
+    from hermes_cli.commands import GATEWAY_KNOWN_COMMANDS
+
+    event = await _capture_synthetic_event(_make_adapter(), _card_event())
+    text = (event.text or "").strip()
+
+    if text.startswith("/"):
+        command = text[1:].split()[0].replace("_", "-")
+        assert command in GATEWAY_KNOWN_COMMANDS, (
+            f"card click dispatched as /{command}, which no handler is registered for"
+        )
+
+
+@pytest.mark.asyncio
 async def test_missing_open_message_id_degrades_without_a_poisoned_id():
     """Older payloads may omit open_message_id.
 

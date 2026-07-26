@@ -3064,10 +3064,16 @@ class FeishuAdapter(BasePlatformAdapter):
         action_tag = str(getattr(action, "tag", "") or "button")
         action_value = getattr(action, "value", {}) or {}
 
-        synthetic_text = f"/card {action_tag}"
+        # Deliberately NOT a slash command. Upstream emitted `/card …`, but
+        # `card` is absent from GATEWAY_KNOWN_COMMANDS, so the gateway answered
+        # "Unrecognized slash command" and discarded the payload — the click
+        # never reached the agent. Cards are our only addressing mechanism in
+        # Lark Topic-mode (ADR 0002), so the click has to arrive as an ordinary
+        # turn the agent can reason about, with the value carried verbatim.
+        synthetic_text = f"[card action] {action_tag} clicked"
         if action_value:
             try:
-                synthetic_text += f" {json.dumps(action_value, ensure_ascii=False)}"
+                synthetic_text += f" with value {json.dumps(action_value, ensure_ascii=False)}"
             except Exception:
                 pass
 
@@ -3085,7 +3091,7 @@ class FeishuAdapter(BasePlatformAdapter):
         )
         synthetic_event = MessageEvent(
             text=synthetic_text,
-            message_type=MessageType.COMMAND,
+            message_type=MessageType.TEXT,
             source=source,
             raw_message=data,
             # A random uuid is a better fallback than `token`: it is obviously

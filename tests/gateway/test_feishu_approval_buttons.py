@@ -412,7 +412,17 @@ class TestResolveApproval:
 # ===========================================================================
 
 class TestNonApprovalCardAction:
-    """Non-approval card actions should still route as synthetic commands."""
+    """Non-approval card actions must still reach the agent.
+
+    FORK EDIT (gonzo): upstream asserted the text began ``/card button``. That
+    string is a slash command, and ``card`` is not in GATEWAY_KNOWN_COMMANDS,
+    so the gateway answered "Unrecognized slash command" and discarded the
+    click. In Lark Topic-mode cards are the only addressing mechanism we have
+    (docs/architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md), so
+    the click now arrives as an ordinary turn. What the test actually cares
+    about — that the click routes and its value survives — is unchanged and
+    still asserted below.
+    """
 
     @pytest.mark.asyncio
     async def test_routes_as_synthetic_command(self):
@@ -435,7 +445,11 @@ class TestNonApprovalCardAction:
 
         mock_handle.assert_called_once()
         event = mock_handle.call_args[0][0]
-        assert "/card button" in event.text
+        assert "button" in event.text
+        assert "custom_action" in event.text, "card value must survive to the agent"
+        assert not event.text.lstrip().startswith("/card"), (
+            "no handler is registered for /card; the click would be discarded"
+        )
 
 
 # ===========================================================================
