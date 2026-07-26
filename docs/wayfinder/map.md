@@ -50,6 +50,17 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
   khai báo *hình dạng vault* chứ không trỏ file, nên suite không vỡ khi vault nở lên ~690
   note; 34 test cấu trúc chạy được hôm nay, trong đó 21 wire check nối thẳng vào văn bản
   governance nên sửa luật vault mà quên sửa case thì suite đỏ.
+- [Kanban và topic↔session của Hermes có đúng docs không](tickets/0005-kanban-va-card-behavior-cua-hermes-co-dung-docs-khong.md) —
+  **có, không cần vá**: hai topic → hai session key → hai agent session độc lập; rủi ro #1
+  được giải theo hướng tốt. Kèm hai xác nhận: session **không bền** (evict sau ~1h, đúng
+  giả định D-02), và mô hình nhiều người dùng có sẵn qua `group_sessions_per_user` /
+  `thread_sessions_per_user`.
+- [Cost cap per-profile ở 9router](tickets/0013-cost-cap-per-profile-o-9router.md) —
+  **không làm được**; 9router chỉ tracking. Cap thật đang ở goclaw và sẽ mất khi cutover.
+- [ADR 0002 — Định vị trong Lark](../architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md) —
+  Lark Topic-mode **không có** định vị theo message (`parent_id == root_id` luôn luôn), nên
+  D-08 chuyển từ `parent_id` sang `card_id`; và chốt **vá adapter trong fork** thay vì viết
+  adapter riêng.
 
 ## Fog
 

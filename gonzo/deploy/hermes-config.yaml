@@ -29,3 +29,13 @@ custom_providers:
     models:
       ag/gemini-3.6-flash-high:
         context_length: 1048576
+
+# Một topic hoặc một group = MỘT session dùng chung (ADR 0002, quyết định 3).
+# `thread_sessions_per_user` vốn đã mặc định false; `group_sessions_per_user`
+# mặc định true nên phải lật — nếu không, nhắn trong group ngoài topic sẽ đẻ
+# một session riêng cho mỗi người.
+platforms:
+  feishu:
+    extra:
+      group_sessions_per_user: false
+      thread_sessions_per_user: false
