@@ -27,4 +27,18 @@ Thư mục script + config, không phải package Python — cố ý không có 
 - **Không secret trong repo.** Lark app secret, token, mapping `lark_user_id → role/domain`
   sống ở runtime config ngoài git.
 
-Trạng thái: **stub.**
+## Đã có
+
+- `hermes-config.yaml` — config runtime, **nguồn sự thật**. Không chứa secret; key chỉ được
+  trỏ tới bằng `key_env`, giá trị sống ở `.env` (gitignored, chmod 600).
+- `apply-config.sh` — áp nó vào `$HERMES_HOME/config.yaml`. Mặc định chỉ in diff; `--write`
+  mới ghi. Kèm kiểm `key_env` có giá trị trong `.env` chưa.
+
+**Vì sao phải có script thay vì để config ở gốc repo.** Fork có hai loader:
+`cli.load_cli_config()` chấp nhận `./cli-config.yaml` làm fallback, nhưng
+`hermes_cli.config.load_config()` — chỗ `hermes_cli/auth.py:1961` resolve provider, tức chỗ
+runtime thật sự đọc — **chỉ** đọc `$HERMES_HOME/config.yaml`. Để config ở gốc repo thì CLI
+thấy mà agent không, và triệu chứng là `No inference provider configured` dù config trông
+hoàn toàn đúng. Đây là một giờ debug đã trả rồi; đừng trả lại.
+
+Trạng thái phần còn lại (launchd, backup/restore, rollback): **stub.**

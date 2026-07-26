@@ -1,0 +1,31 @@
+# Hermes CLI config — fork gonzo.
+#
+# File này ĐƯỢC commit: nó không chứa secret. Key sống ở `.env` (gitignored,
+# chmod 600) và được trỏ tới bằng `key_env`. Đúng luật của gonzo/README.md —
+# không secret trong repo — và đúng D-19: deploy phải tái tạo được từ git.
+#
+# ⚠️ Thứ tự đọc config (cli.py:408): `~/.hermes/config.yaml` THẮNG file này,
+# và nó THAY THẾ chứ không merge. Giữ cho file đó không tồn tại, nếu không thì
+# config trong repo bị vô hiệu một cách âm thầm.
+#
+# Khuôn `custom_providers` dưới đây lấy từ cấu hình Hermes đang chạy thật trên
+# máy (platform/hermes/config.yaml), đổi `host.docker.internal` → `localhost`
+# vì bản này chạy trên host, không trong container.
+
+# Model: ag/gemini-3.6-flash-high. Các con số dưới đây KHÔNG phải phỏng đoán —
+# lấy từ `GET /v1/models` của chính 9router: contextWindow 1048576, maxOutput 65536,
+# tools true (Hermes bắt buộc có), reasoning true với thinkingCanDisable false.
+model:
+  provider: custom:9router
+  default: ag/gemini-3.6-flash-high
+  base_url: http://localhost:20128/v1
+  context_length: 1048576
+
+custom_providers:
+  - name: 9router
+    base_url: http://localhost:20128/v1
+    key_env: GONZO_9ROUTER_KEY
+    api_mode: chat_completions
+    models:
+      ag/gemini-3.6-flash-high:
+        context_length: 1048576
