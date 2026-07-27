@@ -64,6 +64,8 @@ In the Feishu developer console, go to **Permission Management** and add the fol
 | Scope | Purpose |
 |-------|---------|
 | `im:message` | Receive and read messages |
+| `im:message.p2p_msg:readonly` | Receive direct messages sent to the bot |
+| `im:message.group_at_msg:readonly` | Receive group messages that @mention the bot |
 | `im:message:send_as_bot` | Send messages as the bot |
 | `im:resource` | Access images, files, and audio sent by users |
 | `im:chat` | Access chat/group metadata |
@@ -574,6 +576,7 @@ WebSocket and per-group ACL settings are configured via `config.yaml` under `pla
 | `aiohttp not installed; webhook mode unavailable` | Install aiohttp: `pip install aiohttp` |
 | `FEISHU_APP_ID or FEISHU_APP_SECRET not set` | Set both env vars or configure via `hermes gateway setup` |
 | `Another local Hermes gateway is already using this Feishu app_id` | Only one Hermes instance can use the same app_id at a time. Stop the other gateway first. |
+| Group messages work but direct messages are silent | Grant `im:message.p2p_msg:readonly`, publish and approve a new app version, then restart the gateway. Permission changes do not affect the running app until the version is published. |
 | Bot doesn't respond in groups | Ensure the bot is @mentioned, check `FEISHU_GROUP_POLICY`, and verify the sender is in `FEISHU_ALLOWED_USERS` if policy is `allowlist` |
 | `Webhook rejected: invalid verification token` | Ensure `FEISHU_VERIFICATION_TOKEN` matches the token in your Feishu app's Event Subscriptions config |
 | `Webhook rejected: invalid signature` | Ensure `FEISHU_ENCRYPT_KEY` matches the encrypt key in your Feishu app config |

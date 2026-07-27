@@ -69,6 +69,9 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
 - [Log rò credential của WS](tickets/0021-log-ro-credential-cua-ws.md) — logger boundary
   của SDK Lark ép strict-redact `access_key`/`ticket` bất kể config preference; runtime WS
   thật xác nhận secret bị che còn endpoint và public diagnostic params vẫn dùng được.
+- [Docker no-mount pilot và bật Hermes#Test](tickets/0024-docker-no-mount-pilot-va-bat-hermes-test.md) —
+  pilot host+Docker chạy thật: ba đường tool không đọc được raw vault, idle cleanup về 0
+  container, group và DM Lark đều end-to-end; DM cần scope P2P riêng của app.
 
 ## Fog
 
