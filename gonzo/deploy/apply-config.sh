@@ -19,33 +19,57 @@
 
 set -euo pipefail
 
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/hermes-config.yaml"
-DEST="${HERMES_HOME:-$HOME/.hermes}/config.yaml"
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$DEPLOY_DIR/../.." && pwd)"
+SRC="$DEPLOY_DIR/hermes-config.yaml"
+HERMES_ROOT="${HERMES_HOME:-$HOME/.hermes}"
+VAULT_ROOT="${GONZO_VAULT_ROOT:-$(cd "$REPO_ROOT/.." && pwd)/gonzo-vault}"
+DEST="$HERMES_ROOT/config.yaml"
+LAUNCHER_SRC="$REPO_ROOT/gonzo/vault_policy/run-mcp.sh"
+LAUNCHER_DEST="$HERMES_ROOT/bin/gonzo-vault-policy-mcp"
 
 [ -f "$SRC" ] || { echo "không thấy nguồn: $SRC" >&2; exit 1; }
+[ -f "$LAUNCHER_SRC" ] || { echo "không thấy launcher: $LAUNCHER_SRC" >&2; exit 1; }
+[ -d "$VAULT_ROOT" ] || { echo "không thấy vault: $VAULT_ROOT" >&2; exit 1; }
+
+escape_sed() {
+  printf '%s' "$1" | sed 's/[&|]/\\&/g'
+}
+
+RENDERED="$(mktemp "${TMPDIR:-/tmp}/gonzo-hermes-config.XXXXXX")"
+trap 'rm -f "$RENDERED"' EXIT
+sed \
+  -e "s|__HERMES_HOME__|$(escape_sed "$HERMES_ROOT")|g" \
+  -e "s|__GONZO_HERMES_ROOT__|$(escape_sed "$REPO_ROOT")|g" \
+  -e "s|__GONZO_VAULT_ROOT__|$(escape_sed "$VAULT_ROOT")|g" \
+  "$SRC" > "$RENDERED"
 
 if [ "${1:-}" != "--write" ]; then
   echo "nguồn : $SRC"
   echo "đích  : $DEST"
   echo
   if [ -f "$DEST" ]; then
-    if diff -u "$DEST" "$SRC" > /dev/null; then
+    if diff -u "$DEST" "$RENDERED" > /dev/null; then
       echo "không có gì đổi."
     else
       echo "sẽ đổi (- đang chạy, + trong repo):"
-      diff -u "$DEST" "$SRC" | tail -n +3 || true
+      diff -u "$DEST" "$RENDERED" | tail -n +3 || true
     fi
   else
     echo "$DEST chưa tồn tại — sẽ tạo mới."
   fi
+  echo "launcher: $LAUNCHER_DEST"
   echo
   echo "chạy lại với --write để ghi."
   exit 0
 fi
 
 mkdir -p "$(dirname "$DEST")"
-cp "$SRC" "$DEST"
+install -m 600 "$RENDERED" "$DEST"
+mkdir -p "$(dirname "$LAUNCHER_DEST")"
+install -m 755 "$LAUNCHER_SRC" "$LAUNCHER_DEST"
 echo "đã ghi $DEST"
+echo "đã cài $LAUNCHER_DEST"
 
 # Kiểm key ở ĐÚNG chỗ Hermes đọc nó — `.env` — chứ không phải shell hiện tại.
 # Hermes tự nạp `.env` lúc khởi động (cli.py:229), nên biến vắng mặt trong shell

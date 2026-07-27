@@ -30,6 +30,29 @@ custom_providers:
       ag/gemini-3.6-flash-high:
         context_length: 1048576
 
+# Narrow company-vault surface. Hermes spawns this host-side stdio child itself: no TCP
+# listener, no bearer token, no raw filesystem/index tools. apply-config.sh renders the
+# three path placeholders and installs the tracked launcher under HERMES_HOME/bin.
+mcp_servers:
+  gonzo_vault:
+    command: "__HERMES_HOME__/bin/gonzo-vault-policy-mcp"
+    args:
+      - "__GONZO_HERMES_ROOT__/gonzo/vault_policy/server.py"
+      - "--vault"
+      - "__GONZO_VAULT_ROOT__"
+      - "--state-dir"
+      - "__HERMES_HOME__/vault-policy"
+      - "--model-cache"
+      - "__HERMES_HOME__/cache/vault-policy-model"
+    enabled: true
+    timeout: 180
+    connect_timeout: 180
+    supports_parallel_tool_calls: false
+    tools:
+      include: [vault_query]
+      resources: false
+      prompts: false
+
 # Agent core và Lark gateway chạy trên host, nhưng mọi file/terminal/execute-code tool
 # chạy trong Docker không có host mount. Raw gonzo-vault tuyệt đối không được thêm vào
 # docker_volumes; đường duy nhất tới company truth sau này là vault-policy service/MCP.
