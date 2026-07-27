@@ -35,12 +35,14 @@ Thư mục script + config, không phải package Python — cố ý không có 
 - `apply-config.sh` — áp nó vào `$HERMES_HOME/config.yaml`. Mặc định chỉ in diff; `--write`
   mới ghi. Kèm kiểm `key_env` có giá trị trong `.env` chưa.
 
-**Hiện trạng an toàn:** `hermes-config.yaml` chưa có `terminal:` nên Hermes rơi về local
-backend. Runtime hiện tại **không** có filesystem boundary và đã đọc được raw sibling
-`gonzo-vault` qua absolute path. Không nối vault raw, không thêm user thứ hai, và không coi
-process/profile là sandbox. Lifecycle propagation đã được sửa và probe Docker pass 7/7;
-việc tiếp theo là chuyển config production sang Docker no-mount rồi chạy lại negative probes
-trên chính config được deploy trước khi bật gateway.
+**Hiện trạng pilot:** `hermes-config.yaml` đã dùng Docker no-mount cho file, terminal và
+`execute_code`; config được deploy vào `~/.hermes/config.yaml` ngày 2026-07-27. Negative
+probes trên chính config deployed đều pass: cả ba tool path không đọc được raw sibling
+`gonzo-vault`, và lifecycle không để lại container mới. Agent core/Lark gateway vẫn chạy
+trên host; raw vault chưa nối và chỉ được phép đi qua `vault-policy` ở bước sau. Chưa thêm
+user thứ hai trước khi `session_search` được disable hoặc scope.
+
+Backup trước deploy: `~/.hermes/config.yaml.bak-before-docker-pilot-20260727`.
 
 **Vì sao phải có script thay vì để config ở gốc repo.** Fork có hai loader:
 `cli.load_cli_config()` chấp nhận `./cli-config.yaml` làm fallback, nhưng

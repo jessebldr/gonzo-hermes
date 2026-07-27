@@ -30,6 +30,25 @@ custom_providers:
       ag/gemini-3.6-flash-high:
         context_length: 1048576
 
+# Agent core và Lark gateway chạy trên host, nhưng mọi file/terminal/execute-code tool
+# chạy trong Docker không có host mount. Raw gonzo-vault tuyệt đối không được thêm vào
+# docker_volumes; đường duy nhất tới company truth sau này là vault-policy service/MCP.
+terminal:
+  backend: docker
+  cwd: /workspace
+  docker_image: python:3.11-slim
+  docker_mount_cwd_to_workspace: false
+  docker_volumes: []
+  docker_forward_env: []
+  docker_env: {}
+  docker_network: false
+  container_persistent: false
+  docker_persist_across_processes: false
+  docker_orphan_reaper: true
+  container_cpu: 1
+  container_memory: 512
+  container_disk: 0
+
 # Một topic hoặc một group = MỘT session dùng chung (ADR 0002, quyết định 3).
 # `thread_sessions_per_user` vốn đã mặc định false; `group_sessions_per_user`
 # mặc định true nên phải lật — nếu không, nhắn trong group ngoài topic sẽ đẻ

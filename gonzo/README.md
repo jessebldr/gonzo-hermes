@@ -68,3 +68,4 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `tests/gateway/test_feishu_approval_buttons.py` | Một test pin hành vi `/card` cũ; sửa để pin **ý định** (click tới được agent, `value` sống sót) thay vì tiền tố slash | chính nó |
 | `tests/gateway/test_feishu_logging.py` | Pin invariant log WS thật: credential bị che, endpoint và public diagnostic params còn nguyên, không phụ thuộc redaction preference | chính nó |
 | `docs/wayfinder/tickets/0021-log-ro-credential-cua-ws.md` | Ghi root cause, boundary và runtime proof của credential-log fix | ticket này |
+| `docs/wayfinder/tickets/0024-docker-no-mount-pilot-va-bat-hermes-test.md` | Theo dõi deploy Docker boundary vào pilot và phép thử Lark thật trước khi nối vault-policy | ticket này |

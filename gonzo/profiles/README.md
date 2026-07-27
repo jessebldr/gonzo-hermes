@@ -46,8 +46,13 @@ coordination bus, không cần xuất hiện thành nhiều bot trong group.
 7. Trước người thứ hai trong `FEISHU_ALLOWED_USERS`, `session_search` đã disable hoặc scope
    theo người/profile.
 
+## Đã có pilot
+
+- Default profile `~/.hermes` dùng tracked config Docker no-mount; file/terminal/
+  `execute_code` negative probes trên raw vault pass ngày 2026-07-27.
+
 ## Chưa build
 
-- Config production cho personal/shared/specialist profiles.
+- Bộ config production riêng cho từng personal/shared/specialist profile.
 - Router Lark DM · personal workspace · shared topic.
 - Coordination bus và credential grants cho specialist.
