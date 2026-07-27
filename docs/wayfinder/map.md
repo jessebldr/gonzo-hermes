@@ -75,6 +75,9 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
 - [Retrieval thiết kế trên corpus nào](tickets/0009-retrieval-thiet-ke-tren-corpus-nao.md) —
   Gate 3 dùng corpus production gần hoàn chỉnh hiện tại (649 note governed); fixture chỉ
   tạo failure shape cố ý không tồn tại, còn tuning phải gắn vault fingerprint + evaluation.
+- [markdown-vault-mcp — adopt hay tự viết](tickets/0014-markdown-vault-mcp-adopt-hay-tu-viet.md) —
+  adopt có điều kiện `v3.1.0` như private index library sau `vault_policy`, không expose
+  MCP upstream; prototype phải chứng minh commit gate, reread, sanitize và performance.
 
 ## Fog
 

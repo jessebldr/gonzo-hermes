@@ -71,3 +71,6 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `docs/wayfinder/tickets/0021-log-ro-credential-cua-ws.md` | Ghi root cause, boundary và runtime proof của credential-log fix | ticket này |
 | `docs/wayfinder/tickets/0024-docker-no-mount-pilot-va-bat-hermes-test.md` | Theo dõi deploy Docker boundary vào pilot và phép thử Lark thật trước khi nối vault-policy | ticket này |
 | `docs/wayfinder/tickets/0009-retrieval-thiet-ke-tren-corpus-nao.md` | Chốt Gate 3 trên corpus production gần hoàn chỉnh và phân biệt corpus thật với fixture edge-case | ticket này |
+| `docs/research/markdown-vault-mcp-assessment.md` | Đánh giá upstream index theo 4 tiêu chí D-04 và so với `qmd`; chốt chỉ dùng library sau policy | pending — vault index research |
+| `docs/wayfinder/tickets/0014-markdown-vault-mcp-adopt-hay-tu-viet.md` | Chốt adopt có điều kiện private index engine, không expose MCP surface upstream | ticket này |
+| `docs/wayfinder/tickets/0025-chung-minh-markdown-vault-mcp-sau-vault-policy.md` | Prototype gate trước khi giữ dependency index cho Gate 3 | ticket này |
