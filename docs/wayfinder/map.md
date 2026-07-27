@@ -72,12 +72,12 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
 - [Docker no-mount pilot và bật Hermes#Test](tickets/0024-docker-no-mount-pilot-va-bat-hermes-test.md) —
   pilot host+Docker chạy thật: ba đường tool không đọc được raw vault, idle cleanup về 0
   container, group và DM Lark đều end-to-end; DM cần scope P2P riêng của app.
+- [Retrieval thiết kế trên corpus nào](tickets/0009-retrieval-thiet-ke-tren-corpus-nao.md) —
+  Gate 3 dùng corpus production gần hoàn chỉnh hiện tại (649 note governed); fixture chỉ
+  tạo failure shape cố ý không tồn tại, còn tuning phải gắn vault fingerprint + evaluation.
 
 ## Fog
 
-- **Migration vault khu 3–5** (~627 note: intel, marketing/canon ~178, domains/billiards
-  ~449) — ai làm, khi nào, và 449 note bulk-copy không duyệt từng note thì vào ở `status`
-  nào. Một phần đã sắc thành ticket corpus; phần "ai/khi nào" thì chưa.
 - **RAM thật của hybrid topology trên Mac mini** — personal profiles cùng trust domain có
   thể multiplex; specialist có thể tách process. Đo ở Gate 2 trên topology chạy thật,
   không đóng đinh “4 process” trước dữ liệu.
