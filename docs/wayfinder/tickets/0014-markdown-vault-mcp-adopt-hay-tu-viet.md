@@ -3,7 +3,7 @@ id: "0014"
 title: markdown-vault-mcp — adopt hay tự viết
 type: research
 status: open
-assignee: ""
+assignee: "codex"
 blocked_by: ["0009"]
 ---
 
