@@ -19,13 +19,18 @@ if [ -z "$UV_PATH" ]; then
 fi
 
 POLICY_CACHE_DIR="${HERMES_HOME:-$HOME/.hermes}/cache/vault-policy-uv"
+PROJECT_DIR="$(cd "$(dirname "$SERVER_PATH")" && pwd)"
+if [ ! -f "$PROJECT_DIR/pyproject.toml" ] || [ ! -f "$PROJECT_DIR/uv.lock" ]; then
+  echo "vault-policy locked project not found beside server: $SERVER_PATH" >&2
+  exit 1
+fi
+
 export PYTHONDONTWRITEBYTECODE=1
+export UV_PROJECT_ENVIRONMENT="$POLICY_CACHE_DIR/environment"
 
 exec "$UV_PATH" run \
-  --no-project \
-  --isolated \
+  --project "$PROJECT_DIR" \
+  --locked \
+  --no-dev \
   --cache-dir "$POLICY_CACHE_DIR" \
-  --with 'markdown-vault-mcp[embeddings]==3.1.0' \
-  --with 'mcp==1.26.0' \
-  --with 'pyyaml==6.0.3' \
   python "$SERVER_PATH" "$@"

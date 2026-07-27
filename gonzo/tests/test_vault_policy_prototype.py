@@ -48,6 +48,11 @@ class PoisonedCandidateEngine:
     ) -> list[dict[str, object]]:
         return []
 
+    def open_question_relations(
+        self, paths: list[str], *, limit: int
+    ) -> list[dict[str, object]]:
+        return []
+
 
 def _write_note(root: Path, relative_path: str, *, body: str) -> None:
     path = root / relative_path
@@ -186,7 +191,7 @@ class CapturingVault:
         self._source_dir = source_dir
         self._captured = captured
         self.index = self.Index(self)
-        self.reader = self.Reader()
+        self.reader = self.Reader(self)
         self.graph = self.Graph()
 
     class Index:
@@ -215,6 +220,9 @@ class CapturingVault:
             return 1
 
     class Reader:
+        def __init__(self, owner: "CapturingVault") -> None:
+            self._owner = owner
+
         def search(self, query: str, *, mode: str, limit: int, **_: object) -> list[object]:
             assert query == "commercial price"
             if mode == "keyword":
@@ -224,6 +232,14 @@ class CapturingVault:
                     )
                 ]
             return []
+
+        def list_documents(self) -> list[object]:
+            return [
+                SimpleNamespace(path=path, frontmatter=frontmatter)
+                for path, frontmatter in self._owner._captured.get(
+                    "frontmatter", {}
+                ).items()
+            ]
 
     class Graph:
         def get_backlinks(self, path: str) -> list[object]:
@@ -264,6 +280,24 @@ tags: [billiards, cue]
 """,
         encoding="utf-8",
     )
+    _write_custom_note(
+        vault_root,
+        "decisions/open/pricing-source.md",
+        """type: open-question
+status: draft
+authority: 4
+confidence: medium
+scope: brand
+freshness: stable
+captured_at: 2026-07-27
+affects:
+  - ../../brands/kyperus/canon/price.md
+sources:
+  - "vault-approver, 2026-07-27"
+tags: [pricing]
+""",
+        "# Pricing source\n\nWho supplied it?",
+    )
     for excluded in (
         "README.md",
         "_templates/note.md",
@@ -294,11 +328,15 @@ tags: [billiards, cue]
 
     assert captured["paths"] == [
         "brands/kyperus/canon/price.md",
+        "decisions/open/pricing-source.md",
         "domains/billiards/cue-feel.md",
     ]
     assert captured["frontmatter"]["domains/billiards/cue-feel.md"]["sources"] == [
         'agent correction — restored the source\'s "probably" hedge'
     ]
+    assert engine.open_question_relations(
+        ["brands/kyperus/canon/price.md"], limit=8
+    ) == [{"path": "decisions/open/pricing-source.md", "score": 0.4}]
 
 
 class PolicyPipelineEngine:
@@ -328,6 +366,12 @@ class PolicyPipelineEngine:
     ) -> list[dict[str, object]]:
         self.events.append("open_question")
         return [{"path": "decisions/open/pricing.md", "score": 0.95}]
+
+    def open_question_relations(
+        self, paths: list[str], *, limit: int
+    ) -> list[dict[str, object]]:
+        self.events.append("open_question_relations")
+        return []
 
 
 def _write_custom_note(root: Path, relative_path: str, frontmatter: str, body: str) -> None:
@@ -389,6 +433,7 @@ tags: [pricing]
         "graph",
         "semantic",
         "open_question",
+        "open_question_relations",
     ]
     assert response["pipeline"] == [
         "frontmatter_type",

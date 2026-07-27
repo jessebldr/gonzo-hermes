@@ -6,6 +6,8 @@ policy owns commit binding, source rereads, and the model-facing response.
 
 from __future__ import annotations
 
+import posixpath
+import re
 import shutil
 import subprocess
 import time
@@ -38,6 +40,7 @@ _BASE_REQUIRED = {
     "tags",
     "type",
 }
+_MAX_RESULT_CONTENT_CHARS = 1_600
 
 
 def resolve_clean_git_commit(vault_root: Path) -> str:
@@ -82,6 +85,7 @@ class MarkdownVaultIndexEngine:
         self._embedding_provider = embedding_provider
         self._vault_factory = vault_factory
         self._vault: Any = None
+        self._open_question_affects: dict[str, set[str]] = {}
         self.corpus_report: dict[str, object] = {}
         self.rebuild_count = 0
         self.last_rebuild_seconds = 0.0
@@ -100,6 +104,7 @@ class MarkdownVaultIndexEngine:
         self._vault = self._create_vault(mirror_root)
         self._vault.index.build_index(force=False)
         self._vault.index.build_embeddings(force=False)
+        self._refresh_open_question_relations()
 
     def rebuild(self) -> None:
         started = time.perf_counter()
@@ -149,6 +154,7 @@ class MarkdownVaultIndexEngine:
         self._vault = self._create_vault(mirror_root)
         index_stats = self._vault.index.build_index(force=True)
         embedded_chunks = self._vault.index.build_embeddings(force=True)
+        self._refresh_open_question_relations()
         self.corpus_report = {
             "included_count": len(included),
             "included_paths": included,
@@ -196,6 +202,17 @@ class MarkdownVaultIndexEngine:
             filters={"type": "open-question"},
         )
 
+    def open_question_relations(
+        self, paths: list[str], *, limit: int
+    ) -> list[dict[str, object]]:
+        """Return open questions whose ``affects`` field targets a candidate."""
+        target_paths = set(paths)
+        return [
+            {"path": question_path, "score": 0.4}
+            for question_path, affected_paths in self._open_question_affects.items()
+            if target_paths & affected_paths
+        ][:limit]
+
     def _search(
         self,
         query: str,
@@ -231,6 +248,24 @@ class MarkdownVaultIndexEngine:
         return [
             {"path": path, "score": score} for path, score in neighbors.items()
         ]
+
+    def _refresh_open_question_relations(self) -> None:
+        if self._vault is None:
+            raise RuntimeError("index engine has not been built")
+        relations: dict[str, set[str]] = {}
+        for note in self._vault.reader.list_documents():
+            frontmatter = note.frontmatter
+            if str(frontmatter.get("type", "")) != "open-question":
+                continue
+            raw_affects = frontmatter.get("affects", [])
+            values = raw_affects if isinstance(raw_affects, list) else [raw_affects]
+            affected_paths = {
+                _normalize_vault_reference(str(note.path), str(value))
+                for value in values
+                if str(value).strip()
+            }
+            relations[str(note.path)] = affected_paths
+        self._open_question_affects = relations
 
 
 def _load_vault_factory() -> Callable[..., object]:
@@ -276,33 +311,48 @@ class VaultPolicy:
         paths = [str(candidate["path"]) for candidate in symbolic]
         graph = self._engine.graph_neighbors(paths)
         pipeline.append("graph")
-        semantic = self._engine.semantic_search(query, limit=limit)
+
+        candidates: dict[str, float] = {}
+        _add_ranked_candidates(candidates, symbolic)
+        _add_ranked_candidates(candidates, graph)
+        if len(candidates) < limit:
+            semantic = self._engine.semantic_search(
+                query, limit=limit - len(candidates)
+            )
+            _add_ranked_candidates(candidates, semantic)
         pipeline.append("semantic_fallback_rerank")
+
         open_question_candidates = self._engine.open_question_search(
             query, limit=limit
         )
+        related_open_questions = self._engine.open_question_relations(
+            list(candidates), limit=limit
+        )
         pipeline.append("open_question")
 
-        candidates: dict[str, float] = {}
-        for candidate in [*symbolic, *graph, *semantic]:
-            path = str(candidate["path"])
-            score = float(candidate.get("score", 0.0))
-            candidates[path] = max(score, candidates.get(path, float("-inf")))
-
         classified_results = [
-            self._reread(path, score)
-            for path, score in sorted(
-                candidates.items(), key=lambda item: item[1], reverse=True
-            )
+            self._reread(path, score, query=query)
+            for path, score in candidates.items()
         ]
         results = [
             _public_result(result)
             for result in classified_results
             if result["_note_type"] != "open-question"
         ][:limit]
+        open_question_scores: dict[str, float] = {}
+        _add_ranked_candidates(open_question_scores, open_question_candidates)
+        _add_ranked_candidates(open_question_scores, related_open_questions)
+        _add_ranked_candidates(
+            open_question_scores,
+            [
+                {"path": result["path"], "score": result["score"]}
+                for result in classified_results
+                if result["_note_type"] == "open-question"
+            ],
+        )
         classified_open_questions = [
-            self._reread(str(candidate["path"]), float(candidate.get("score", 0.0)))
-            for candidate in open_question_candidates
+            self._reread(path, score, query=query)
+            for path, score in open_question_scores.items()
         ]
         open_questions = [
             _public_result(result)
@@ -321,7 +371,8 @@ class VaultPolicy:
             "multiple_relevant_notes": approved_relevant >= 2,
             "requires_multi_cite": approved_relevant >= 2,
             "blocked_by_open_question": any(
-                result["use_class"] == "undecided" for result in open_questions
+                result["use_class"] == "undecided" and result["_blocks_task"]
+                for result in classified_open_questions
             ),
         }
 
@@ -351,7 +402,9 @@ class VaultPolicy:
             return
         raise RuntimeError("vault changed during three consecutive synchronous rebuilds")
 
-    def _reread(self, relative_path: str, score: float) -> dict[str, Any]:
+    def _reread(
+        self, relative_path: str, score: float, *, query: str
+    ) -> dict[str, Any]:
         source_path = (self._vault_root / relative_path).resolve()
         source_path.relative_to(self._vault_root)
         frontmatter, body = _parse_flat_frontmatter(
@@ -361,10 +414,11 @@ class VaultPolicy:
         return {
             "path": relative_path,
             "title": title,
-            "content": body.strip(),
+            "content": _relevant_excerpt(body, query),
             "use_class": _use_class(frontmatter),
             "score": score,
             "_note_type": str(frontmatter.get("type", "")),
+            "_blocks_task": _frontmatter_bool(frontmatter.get("blocking")),
         }
 
 
@@ -421,8 +475,114 @@ def _first_heading(body: str) -> str | None:
     return None
 
 
+def _add_ranked_candidates(
+    target: dict[str, float], candidates: list[dict[str, object]]
+) -> None:
+    """Preserve channel/rank order; scores are comparable only within a channel."""
+    for candidate in candidates:
+        path = str(candidate["path"])
+        score = float(candidate.get("score", 0.0))
+        if path not in target:
+            target[path] = score
+
+
+def _normalize_vault_reference(source_path: str, reference: str) -> str:
+    cleaned = reference.strip().replace("\\", "/")
+    if cleaned.startswith(("./", "../")):
+        return posixpath.normpath(
+            posixpath.join(posixpath.dirname(source_path), cleaned)
+        )
+    return posixpath.normpath(cleaned.lstrip("/"))
+
+
+def _relevant_excerpt(
+    body: str, query: str, *, max_chars: int = _MAX_RESULT_CONTENT_CHARS
+) -> str:
+    """Keep model-facing results bounded while retaining query-relevant text."""
+    content = body.strip()
+    if len(content) <= max_chars:
+        return content
+
+    query_text = query.casefold().strip()
+    query_terms = {
+        term for term in re.findall(r"\w+", query_text) if len(term) >= 3
+    }
+    blocks = [block.strip() for block in re.split(r"\n\s*\n", content) if block.strip()]
+
+    def relevance(block: str) -> tuple[int, int, int]:
+        folded = block.casefold()
+        exact = int(bool(query_text) and query_text in folded)
+        distinct = sum(term in folded for term in query_terms)
+        occurrences = sum(folded.count(term) for term in query_terms)
+        return exact, distinct, occurrences
+
+    ranked = sorted(
+        enumerate(blocks),
+        key=lambda item: (*relevance(item[1]), -item[0]),
+        reverse=True,
+    )
+    relevant_indices = [
+        index for index, block in ranked if relevance(block) != (0, 0, 0)
+    ]
+    candidate_indices: list[int] = []
+    for index in relevant_indices:
+        if index not in candidate_indices:
+            candidate_indices.append(index)
+        if blocks[index].lstrip().startswith("#") and index + 1 < len(blocks):
+            if index + 1 not in candidate_indices:
+                candidate_indices.append(index + 1)
+    if not candidate_indices:
+        candidate_indices = list(range(len(blocks)))
+
+    selected: list[tuple[int, str]] = []
+    remaining = max_chars - 2
+    for index in candidate_indices:
+        block = blocks[index]
+        if remaining <= 0:
+            break
+        separator = 2 if selected else 0
+        available = remaining - separator
+        if available <= 0:
+            break
+        excerpt = _clip_block(block, query_text, query_terms, available)
+        if not excerpt:
+            continue
+        selected.append((index, excerpt))
+        remaining -= separator + len(excerpt)
+
+    selected.sort(key=lambda item: item[0])
+    excerpt = "\n\n".join(block for _, block in selected)
+    return f"{excerpt}\n…" if excerpt else f"{content[: max_chars - 2]}\n…"
+
+
+def _clip_block(
+    block: str, query_text: str, query_terms: set[str], max_chars: int
+) -> str:
+    if len(block) <= max_chars:
+        return block
+    folded = block.casefold()
+    anchors = [folded.find(query_text)] if query_text else []
+    anchors.extend(folded.find(term) for term in query_terms)
+    anchor = min((position for position in anchors if position >= 0), default=0)
+    start = max(0, anchor - max_chars // 3)
+    end = min(len(block), start + max_chars)
+    start = max(0, end - max_chars)
+    clipped = block[start:end].strip()
+    if start:
+        clipped = f"…{clipped[1:]}"
+    if end < len(block):
+        clipped = f"{clipped[:-1]}…"
+    return clipped
+
+
 def _public_result(classified: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in classified.items() if not key.startswith("_")}
+
+
+def _frontmatter_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _use_class(frontmatter: dict[str, object]) -> str:

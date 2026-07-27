@@ -36,9 +36,42 @@ Bảy thành phần, **chạy đúng thứ tự này**, symbolic trước semant
 Promote (`draft` → `approved`) không nằm ở đây — đó là `gonzo/publisher/`, service duy
 nhất được ghi field `status`.
 
-`markdown-vault-mcp` **không phải dependency bắt buộc**. Prototype trên corpus production
-đã pass điều kiện adopt `v3.1.0` như private index engine sau policy; xem
-[`../prototypes/NOTES.md`](../prototypes/NOTES.md). Không expose MCP upstream. Production
-Gate 3 vẫn phải absorb seam + tests và chạy retrieval evaluation.
+`markdown-vault-mcp` là **private index engine**, không phải model-facing MCP. Dependency
+khai báo bằng range có upper bound trong `pyproject.toml`; `uv.lock` hiện resolve `v3.1.0`
+và giữ artifact hash cho deploy reproducible.
+Production server expose đúng một stdio tool là `vault_query`; resources, prompts, raw
+index và tool surface upstream không được đăng ký. Process spawn + stdio pipe là capability
+boundary: không có TCP listener hay bearer credential để đoán/sai. Chỉ process Hermes có
+config mới spawn được child này, và config whitelist đúng một tool.
 
-Trạng thái: **stub.**
+## Pilot production hiện tại
+
+- Entry point: `server.py`; launcher chạy locked project: `run-mcp.sh`.
+- Vault source: `/Users/aigonzo/Company/gonzo-vault`.
+- Persistent private state: `~/.hermes/vault-policy`; model cache:
+  `~/.hermes/cache/vault-policy-model`.
+- Cold build trên corpus thật: `67.83s`; process mới mở index persisted và query warm:
+  `0.13s` (2026-07-27).
+- Open-question lane bundle từ symbolic search, wikilink graph và `affects`. Note
+  `blocking: false` vẫn được báo cho model nhưng không chặn fact đã quyết; chỉ
+  `blocking: true` mới bật `blocked_by_open_question`.
+- Semantic chỉ chạy fallback khi symbolic + graph chưa lấp đủ result limit; score giữa
+  các channel không bị trộn như thể cùng thang đo.
+- Kết quả model-facing reread raw Markdown nhưng chỉ trả excerpt liên quan, tối đa 1.600
+  ký tự/note. Runtime payload giảm từ `135–159 KB` (bị Hermes truncate) xuống khoảng
+  `37–50 KB` và không còn bị truncate.
+- Canary thật đã trả đúng approval authority với multi-cite; canary open-question
+  `who-sourced-kyperus-pricing` nói chưa biết/chưa quyết và dừng suy đoán.
+- Raw vault vẫn không được mount vào Docker tool environment; `read_file` trực tiếp trả
+  `File not found`.
+- E2E reproducible: `scripts/run_tests.sh
+  gonzo/tests/vault_policy/test_production_e2e.py -m integration -q -s` dựng temp git vault + temp
+  `HERMES_HOME`, cài lockfile, build real index/embedding và gọi tool qua stdio.
+
+Deploy trong repo này hiện **chỉ nhắm Mac pilot của owner** (launchd + Bash launcher),
+không phải surface cross-platform của upstream Hermes. Nếu mở cho Windows/Linux team host,
+phải thêm launcher native tương ứng trước khi dùng config này.
+
+Prototype gốc và corpus evidence: [`../prototypes/NOTES.md`](../prototypes/NOTES.md).
+Gate 3 retrieval evaluation rộng hơn vẫn là work tiếp theo; pilot seam này đã được absorb
+vào production code và chạy thật.

@@ -1,0 +1,13 @@
+[project]
+name = "gonzo-vault-policy-runtime"
+version = "0.1.0"
+description = "Locked isolated runtime for the Gonzo governed-vault policy service"
+requires-python = ">=3.11"
+dependencies = [
+    "markdown-vault-mcp[embeddings]>=3.1.0,<4",
+    "mcp>=1.26.0,<2",
+    "pyyaml>=6.0.3,<7",
+]
+
+[tool.uv]
+package = false

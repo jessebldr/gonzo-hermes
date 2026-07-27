@@ -27,9 +27,10 @@ Baseline fork + mô hình branch: [`docs/architecture/decisions/0001-fork-baseli
 | `tests/` | Truth-integrity suite (D-17①) + test cho các module trên | D-17 | ⑦ | 1, 3+ |
 | `prototypes/` | Runner throwaway để bác/chứng minh premise bằng runtime; xoá hoặc absorb sau khi có ADR | ADR 0003 | — | — |
 
-Trạng thái hiện tại: các thư mục production vẫn là stub; `prototypes/` đã chạy để trả lời
-boundary premise nhưng không phải production code. Thứ tự build và điều kiện đậu của từng
-tầng nằm ở §8 — không tầng nào được coi là xong nếu chưa qua gate của nó.
+Trạng thái hiện tại: `vault_policy/` đã thành production pilot read-only và chạy thật qua
+stdio MCP hẹp; các module production còn lại phần lớn vẫn là stub. `prototypes/` giữ
+evidence trước khi absorb, không phải runtime production. Thứ tự build và điều kiện đậu của
+từng tầng nằm ở §8 — không tầng nào được coi là xong nếu chưa qua gate của nó.
 
 ## Luật của thư mục này
 
@@ -74,3 +75,4 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `docs/research/markdown-vault-mcp-assessment.md` | Đánh giá upstream index theo 4 tiêu chí D-04 và so với `qmd`; chốt chỉ dùng library sau policy | pending — vault index research |
 | `docs/wayfinder/tickets/0014-markdown-vault-mcp-adopt-hay-tu-viet.md` | Chốt adopt có điều kiện private index engine, không expose MCP surface upstream | ticket này |
 | `docs/wayfinder/tickets/0025-chung-minh-markdown-vault-mcp-sau-vault-policy.md` | Prototype gate trước khi giữ dependency index cho Gate 3 | ticket này |
+| `docs/wayfinder/tickets/0026-absorb-vault-policy-va-noi-pilot-hermes.md` | Absorb read-only policy seam, deploy stdio MCP hẹp và ghi runtime canary của pilot | ticket này |
