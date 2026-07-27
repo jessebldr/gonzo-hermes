@@ -3,7 +3,7 @@ id: "0025"
 title: Chứng minh markdown-vault-mcp sau vault-policy
 type: prototype
 status: open
-assignee: ""
+assignee: "codex"
 blocked_by: []
 ---
 
