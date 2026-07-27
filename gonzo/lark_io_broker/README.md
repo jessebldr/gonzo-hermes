@@ -3,11 +3,9 @@
 Quyết định chi phối: **D-20**. Kèm **D-07** (topic ↔ session), **D-08** (message có địa
 chỉ), **D-09** (clarify card), **D-10/D-16** (Base + từ vựng trạng thái). Workstream ③. Gate 2.
 
-Một bot identity, một WS gateway sống trong process orchestrator, nhận **toàn bộ** inbound.
-Worker không kết nối Lark — nhưng cũng **không** được bắt chảy nội dung qua context của
-orchestrator: làm vậy thì ranh giới "orchestrator không tự làm deliverable" (D-01) mất khả
-năng thực thi, vì nội dung đã nằm trong context nó rồi thì "ráp lại" với "sửa cho mượt"
-không phân biệt được.
+Một bot identity, một WS gateway/router nhận **toàn bộ** inbound rồi route về personal hoặc
+shared task profile. Specialist không kết nối Lark và không dùng shared memory/context live;
+task owner nhận artifact theo contract.
 
 ## API — hẹp, cố ý
 
@@ -18,9 +16,10 @@ không phân biệt được.
 **nguyên payload**, ghi lại `{message_id/card_id, task_id, owner_profile, root_id,
 content_hash}`.
 
-**Inbound:** gateway nhận reply/card callback → route theo `root_id` / `parent_id` /
-`card_id` → tra routing table ra `task_id` + `owner_profile` → ghi event vào **Kanban
-inbox** của worker sở hữu task → dispatcher đánh thức đúng worker process.
+**Inbound:** gateway route topic theo `root_id`/`thread_id`; card button định vị deliverable
+theo `card_id` + payload → tra routing table ra `task_id` + `owner_profile` → ghi event vào
+**Kanban inbox** của profile sở hữu task → dispatcher đánh thức đúng worker process. Trong
+Topic-mode, `parent_id == root_id`; không dùng nó làm per-message pointer (ADR 0002).
 
 ## Bất biến
 
@@ -37,5 +36,5 @@ inbox** của worker sở hữu task → dispatcher đánh thức đúng worker 
 Worker gửi được card **không** cầm app secret; capability sai `task_id`/action → **từ chối**;
 kill broker giữa chừng rồi restart → **không gửi trùng card**.
 
-Trạng thái: **stub.** Tiền đề `larksuite/lark-openapi-mcp` + limit của card (size, số nút,
-PATCH rate) chưa verify — Gate 0.
+Trạng thái: **stub.** Card limits đã đo thật; `larksuite/lark-openapi-mcp` vẫn là tiền đề
+Gate 0 chưa resolve.

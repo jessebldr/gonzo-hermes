@@ -61,14 +61,20 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
   Lark Topic-mode **không có** định vị theo message (`parent_id == root_id` luôn luôn), nên
   D-08 chuyển từ `parent_id` sang `card_id`; và chốt **vá adapter trong fork** thay vì viết
   adapter riêng.
+- [ADR 0003 — Hybrid personal agents và filesystem boundary](../architecture/decisions/0003-hybrid-personal-agents-va-filesystem-boundary.md) —
+  personal agent làm end-to-end mặc định, specialist chỉ escalation; profile memory A/B
+  tách thật nhưng process/local backend không sandbox filesystem. Boundary production là
+  Docker no-mount per profile; raw vault chỉ qua policy seam. Config lifecycle của
+  terminal/file/execute-code đã dùng chung contract và full runtime probe pass 7/7.
 
 ## Fog
 
 - **Migration vault khu 3–5** (~627 note: intel, marketing/canon ~178, domains/billiards
   ~449) — ai làm, khi nào, và 449 note bulk-copy không duyệt từng note thì vào ở `status`
   nào. Một phần đã sắc thành ticket corpus; phần "ai/khi nào" thì chưa.
-- **RAM thật của 4 process trên Mac mini** — doc hẹn đo ở Gate 2. Sắc rồi nhưng chưa có
-  gì để đo; graduate khi 4 process chạy được.
+- **RAM thật của hybrid topology trên Mac mini** — personal profiles cùng trust domain có
+  thể multiplex; specialist có thể tách process. Đo ở Gate 2 trên topology chạy thật,
+  không đóng đinh “4 process” trước dữ liệu.
 - **Media/3D thành domain + profile riêng** — không còn là giả thuyết: goclaw đã có
   `media-producer-*` đang chạy, và validator vault đã nhận `subject-matter-owner (<domain>)`.
   Chưa rõ nó vào như profile thứ 5 hay như một workstream riêng.

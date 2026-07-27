@@ -5,18 +5,18 @@ bao giờ có thư mục tên `gonzo/`, nên **không file nào trong đây có 
 cherry-pick upstream**. Đó là toàn bộ lý do nó tồn tại.
 
 Ngược lại: file **ngoài** `gonzo/` là file của upstream. Sửa một file như vậy tạo ra một
-điểm conflict vĩnh viễn cho mọi lần sync về sau. D-19 cho phép — dispatcher, process
-isolation, session routing bắt buộc phải đụng core — nhưng có giá. Nên mỗi lần sửa file
+điểm conflict vĩnh viễn cho mọi lần sync về sau. D-19 cho phép — dispatcher, profile
+routing, sandbox propagation, session routing có thể phải đụng core — nhưng có giá. Nên mỗi lần sửa file
 upstream phải: (a) là một commit riêng, có test; (b) được ghi vào bảng cuối file này.
 
 Bối cảnh đầy đủ: [`docs/architecture/hermes-vault-agent-team-architecture.md`](../docs/architecture/hermes-vault-agent-team-architecture.md).
 Baseline fork + mô hình branch: [`docs/architecture/decisions/0001-fork-baseline-and-branch-model.md`](../docs/architecture/decisions/0001-fork-baseline-and-branch-model.md).
 
-## Bản đồ — 8 thư mục, 1:1 với 7 workstream của D-21
+## Bản đồ — 8 thư mục production + prototype throwaway
 
 | Thư mục | Là gì | Quyết định | Workstream | Gate |
 |---|---|---|---|---|
-| `profiles/` | Config 4 profile (`mkt-orchestrator`, `mkt-research`, `mkt-creative`, `mkt-reviewer`), mỗi cái một process, credential riêng | D-03 | ① | 2 |
+| `profiles/` | Config personal/shared/specialist profiles; memory state tách, Docker no-mount là filesystem boundary | D-01, D-03, ADR 0003 | ① | 2 |
 | `kanban_bus/` | `team_ask`, dispatcher đánh thức worker, worker inbox trên Kanban SQLite | D-02, D-03 | ② | 2 |
 | `lark_io_broker/` | `post_message` · `post_card` · `patch_card` · `write_base_row` qua signed capability; routing table durable + idempotent | D-20 | ③ | 2 |
 | `vault_policy/` | Retrieval 7 thành phần (symbolic → graph → semantic), read contract `use_class`, draft-write theo `status` | D-04, D-04a, D-04b | ④ | 3, 4 |
@@ -25,9 +25,11 @@ Baseline fork + mô hình branch: [`docs/architecture/decisions/0001-fork-baseli
 | `scanner/` | Pre-load truth gate: staging → quét → rewrite fact thành vault lookup → activate / quarantine / hard block | D-15 | ⑥ | 2 |
 | `deploy/` | launchd plist, health check, backup/restore Kanban, deploy + rollback bằng script | D-18, D-21 | ⑦ | 2, 5 |
 | `tests/` | Truth-integrity suite (D-17①) + test cho các module trên | D-17 | ⑦ | 1, 3+ |
+| `prototypes/` | Runner throwaway để bác/chứng minh premise bằng runtime; xoá hoặc absorb sau khi có ADR | ADR 0003 | — | — |
 
-Trạng thái hiện tại: **tất cả đều là stub.** Thứ tự build và điều kiện đậu của từng tầng
-nằm ở §8 của tài liệu kiến trúc — không tầng nào được coi là xong nếu chưa qua gate của nó.
+Trạng thái hiện tại: các thư mục production vẫn là stub; `prototypes/` đã chạy để trả lời
+boundary premise nhưng không phải production code. Thứ tự build và điều kiện đậu của từng
+tầng nằm ở §8 — không tầng nào được coi là xong nếu chưa qua gate của nó.
 
 ## Luật của thư mục này
 
@@ -50,5 +52,16 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | File | Vì sao | Commit |
 |---|---|---|
 | `pyproject.toml` | Đăng ký package `gonzo` vào `packages.find`, thêm `gonzo/tests` vào `testpaths` | khung ban đầu |
+| `docs/architecture/hermes-vault-agent-team-architecture.md` | Runtime evidence supersede D-01/D-03 bằng hybrid personal agents + Docker filesystem boundary | pending — ADR 0003 |
+| `docs/architecture/decisions/0003-hybrid-personal-agents-va-filesystem-boundary.md` | Decision record cho topology và boundary đã test thật; file fork-owned, không có upstream counterpart | pending — ADR 0003 |
+| `docs/wayfinder/map.md` | Ghi decision ADR 0003 và cập nhật fog RAM/topology | pending — ADR 0003 |
+| `docs/wayfinder/tickets/0022-profile-khong-phai-filesystem-boundary.md` | Đóng prototype ticket bằng runtime evidence | pending — ADR 0003 |
+| `docs/wayfinder/tickets/0023-file-tools-lam-roi-docker-lifecycle-config.md` | Đóng config propagation bug bằng tests + runtime probe 7/7 | pending — lifecycle fix |
+| `tools/terminal_tool.py` | Một shared container-config builder cho mọi environment creation path | pending — lifecycle fix |
+| `tools/file_tools.py` | File-first environment creation dùng full container contract | pending — lifecycle fix |
+| `tools/code_execution_tool.py` | Execute-first environment creation dùng full container contract | pending — lifecycle fix |
+| `tests/tools/test_file_tools_container_config.py` | Pin exact file-first container contract bằng non-default values | pending — lifecycle fix |
+| `tests/tools/test_code_execution_container_config.py` | Pin exact execute-first container contract bằng non-default values | pending — lifecycle fix |
+| `tests/tools/test_docker_network_config.py` | Thay AST change-detector bằng behavioral contract trên shared builder | pending — lifecycle fix |
 | `plugins/platforms/feishu/adapter.py` | Card action: dùng `context.open_message_id` thay cho card token (`c-…`), resolve `thread_id` của topic, và không phát `/card` (lệnh không ai đăng ký). Bắt buộc vì Lark Topic-mode không có định vị theo message — [ADR 0002](../docs/architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md) | `test_feishu_card_action_addressing.py` |
 | `tests/gateway/test_feishu_approval_buttons.py` | Một test pin hành vi `/card` cũ; sửa để pin **ý định** (click tới được agent, `value` sống sót) thay vì tiền tố slash | chính nó |

@@ -7,8 +7,9 @@ Thư mục script + config, không phải package Python — cố ý không có 
 
 ## Nội dung dự kiến
 
-- launchd plist cho 4 process + KeepAlive, và **health-check script nhẹ** (Hermes watchdog
-  chỉ có systemd — macOS không có; theo dõi 1 tuần ở Gate 5).
+- launchd plist cho gateway và các specialist process thực sự cần tách + KeepAlive, cùng
+  **health-check script nhẹ** (Hermes watchdog chỉ có systemd — macOS không có; theo dõi
+  1 tuần ở Gate 5). Personal profiles cùng trust domain có thể multiplex.
 - Backup/restore Kanban: SQLite online backup API hoặc `VACUUM INTO` — **không** copy file DB
   đang chạy. ≥1 bản off-device, có retention, **restore test tự động**.
 - Script deploy + rollback. **Rollback drill phải pass ở Gate 6** trước khi cutover.
@@ -33,6 +34,13 @@ Thư mục script + config, không phải package Python — cố ý không có 
   trỏ tới bằng `key_env`, giá trị sống ở `.env` (gitignored, chmod 600).
 - `apply-config.sh` — áp nó vào `$HERMES_HOME/config.yaml`. Mặc định chỉ in diff; `--write`
   mới ghi. Kèm kiểm `key_env` có giá trị trong `.env` chưa.
+
+**Hiện trạng an toàn:** `hermes-config.yaml` chưa có `terminal:` nên Hermes rơi về local
+backend. Runtime hiện tại **không** có filesystem boundary và đã đọc được raw sibling
+`gonzo-vault` qua absolute path. Không nối vault raw, không thêm user thứ hai, và không coi
+process/profile là sandbox. Lifecycle propagation đã được sửa và probe Docker pass 7/7;
+việc tiếp theo là chuyển config production sang Docker no-mount rồi chạy lại negative probes
+trên chính config được deploy trước khi bật gateway.
 
 **Vì sao phải có script thay vì để config ở gốc repo.** Fork có hai loader:
 `cli.load_cli_config()` chấp nhận `./cli-config.yaml` làm fallback, nhưng

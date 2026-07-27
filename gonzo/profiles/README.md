@@ -1,29 +1,53 @@
-# `profiles` — 4 vai, 4 process, không hơn
+# `profiles` — personal-first, specialist khi cần
 
-Quyết định chi phối: **D-01** (4 vai), **D-03** (process-per-profile). Workstream ①. Gate 2.
+Quyết định chi phối: [ADR 0003](../../docs/architecture/decisions/0003-hybrid-personal-agents-va-filesystem-boundary.md).
+Workstream ①. Gate 2.
 
 Thư mục config, không phải package Python — cố ý không có `__init__.py`.
 
-| Profile | Nhiệm vụ | Được phép | KHÔNG được phép |
+## Topology
+
+| Profile class | Sở hữu | Mặc định làm gì | Khi nào tách process |
 |---|---|---|---|
-| `mkt-orchestrator` | Nhận brief, tạo thẻ cha + con, gán lane, ráp output, trả lời thread. **Đồng thời host Lark gateway.** | Kanban full, vault read | Tự làm deliverable, ghi vault |
-| `mkt-research` | Evidence ngoài + tri thức approved → memo gắn vào thẻ | Vault read, web, draft-write | Đưa memo chưa duyệt thành "fact" |
-| `mkt-creative` | Brief + memo → hooks/scripts/variants, ghi vào Base | Vault read, Base write, image/video tools | Dùng note `status: draft` làm tri thức nền |
-| `mkt-reviewer` | Soi từng claim với note approved, viết publication-candidate (draft), gửi card adopt | Vault read + draft-write, gọi adoption card | **Promote.** Và không đưa doctrine tự suy lên card adopt |
+| Personal — một người một profile | session, memory, USER, skills, preference | Làm task end-to-end; DM + personal workspace cùng route vào đây | Có thể multiplex cùng gateway khi cùng trust domain |
+| Shared task | session/topic và state công việc chung | Phục vụ shared group/topic; không route theo người nói | Theo crash/resource domain của workload |
+| `research` specialist | web/data connectors, research procedure | Escalation khi cần evidence sâu hoặc parallelism | Credential riêng → process riêng |
+| `creative` specialist | creative procedure + media tools | Escalation khi cần chuyên môn/media | Tool/resource riêng → process riêng |
+| `reviewer` specialist | fresh context + vault-policy read | Independent review ở biên factual/public/irreversible | Quyền/audit riêng → process riêng |
 
-## Bất biến
+Lark bot là transport/front door, không phải một agent. Một bot route DM/personal workspace
+về personal profile, shared topic về shared task profile; specialist làm việc qua
+coordination bus, không cần xuất hiện thành nhiều bot trong group.
 
-- Mỗi profile có **session, memory, skills, staging, scanner và credential riêng.**
-  Credential riêng là thứ biến audit log từ "Hermes ghi cái này" thành "`mkt-reviewer` ghi
-  cái này lúc X" — đúng chất lượng provenance mà vault được dựng lên để có.
-- **Không shared context, không shared memory.** Phối hợp đi qua `gonzo/kanban_bus/`.
-- Tiêu chí đậu Gate 2: ghi một fact đặc trưng vào memory `mkt-research` → `mkt-creative`
-  **phải không biết**; và audit log chỉ đúng profile đã thực hiện từng hành động.
-- Thêm vai = thêm một process nữa, không redesign (P6). Profile thứ 5 `ops` là mở rộng đã dự trù.
+## Bất biến đã có bằng chứng runtime
 
-## Chưa chốt
+- Profile A ghi preference vào `USER.md`, session mới của A recall đúng; profile B cùng
+  model/config trả `UNKNOWN`.
+- Profile chỉ tách state; **không** sandbox filesystem trên local backend.
+- Security boundary cho raw file/terminal tools là Docker no-mount theo profile:
+  `docker_mount_cwd_to_workspace: false`, `docker_volumes` allowlist tối thiểu, không mount
+  raw `gonzo-vault`.
+- Terminal, file tools và `execute_code` dùng chung container-config contract; full runtime
+  probe pass 7/7, gồm lifecycle teardown không để lại container.
+- Raw vault chỉ tới agent qua `vault-policy` read contract; process separation không được
+  dùng thay cho negative probe filesystem.
+- Không shared memory live. Chia sẻ knowledge qua artifact đúng loại: personal memory,
+  shared-skill draft, vault draft+approval, hoặc Kanban/Base.
 
-RAM thực tế của 4 process trên Mac mini — **đo ở Gate 2**, không đoán. Cost cap per-profile
-thực thi ở 9router (Hermes chỉ tracking) — chốt cấu hình ở Gate 1.
+## Gate 2 phải chứng minh
 
-Trạng thái: **stub.**
+1. Hai personal profile route đúng và memory/session không bleed.
+2. Shared topic dùng một shared task session, không tách theo speaker.
+3. Personal agent tự hoàn tất task bình thường; escalation specialist chỉ khi contract yêu
+   cầu.
+4. Fresh reviewer chạy ở boundary đã định, không phải mọi lượt creative.
+5. Host-vault và cross-profile absolute-path probes fail trong sandbox.
+6. Credential/audit log đúng profile thực hiện action.
+7. Trước người thứ hai trong `FEISHU_ALLOWED_USERS`, `session_search` đã disable hoặc scope
+   theo người/profile.
+
+## Chưa build
+
+- Config production cho personal/shared/specialist profiles.
+- Router Lark DM · personal workspace · shared topic.
+- Coordination bus và credential grants cho specialist.

@@ -14,6 +14,7 @@ def _make_env_config(**overrides):
         "cwd": "/workspace",
         "host_cwd": None,
         "timeout": 180,
+        "modal_mode": "direct",
         "container_cpu": 2,
         "container_memory": 4096,
         "container_disk": 20480,
@@ -21,6 +22,12 @@ def _make_env_config(**overrides):
         "docker_volumes": [],
         "docker_mount_cwd_to_workspace": True,
         "docker_forward_env": ["MY_SECRET", "API_KEY"],
+        "docker_env": {"PROBE_MODE": "strict"},
+        "docker_run_as_host_user": True,
+        "docker_extra_args": ["--cap-drop=ALL"],
+        "docker_network": False,
+        "docker_persist_across_processes": False,
+        "docker_orphan_reaper": False,
     }
     base.update(overrides)
     return base
@@ -72,6 +79,27 @@ class TestFileToolsContainerConfig:
         del cfg["docker_forward_env"]
         cc = self._run(cfg, "t4").get("container_config", {})
         assert cc.get("docker_forward_env") == []
+
+    def test_file_first_environment_honors_full_container_contract(self):
+        """File-first environment creation must not weaken container policy."""
+        cc = self._run(_make_env_config(), "t-runtime-options").get("container_config", {})
+
+        assert cc == {
+            "container_cpu": 2,
+            "container_memory": 4096,
+            "container_disk": 20480,
+            "container_persistent": False,
+            "modal_mode": "direct",
+            "docker_volumes": [],
+            "docker_mount_cwd_to_workspace": True,
+            "docker_forward_env": ["MY_SECRET", "API_KEY"],
+            "docker_env": {"PROBE_MODE": "strict"},
+            "docker_run_as_host_user": True,
+            "docker_extra_args": ["--cap-drop=ALL"],
+            "docker_network": False,
+            "docker_persist_across_processes": False,
+            "docker_orphan_reaper": False,
+        }
 
     def test_cwd_only_raw_task_override_reaches_file_environment(self):
         """CWD-only task overrides collapse to default but must keep their cwd."""
