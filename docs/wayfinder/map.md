@@ -78,6 +78,9 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
 - [markdown-vault-mcp — adopt hay tự viết](tickets/0014-markdown-vault-mcp-adopt-hay-tu-viet.md) —
   adopt có điều kiện `v3.1.0` như private index library sau `vault_policy`, không expose
   MCP upstream; prototype phải chứng minh commit gate, reread, sanitize và performance.
+- [Chứng minh markdown-vault-mcp sau vault-policy](tickets/0025-chung-minh-markdown-vault-mcp-sau-vault-policy.md) —
+  pass trên 665-note corpus: giữ `v3.1.0` làm private index engine sau normalized mirror +
+  clean-commit gate; warm p95 35.6 ms, peak RSS ~780 MiB, không cần fork upstream.
 
 ## Fog
 
