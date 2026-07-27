@@ -36,7 +36,9 @@ Bảy thành phần, **chạy đúng thứ tự này**, symbolic trước semant
 Promote (`draft` → `approved`) không nằm ở đây — đó là `gonzo/publisher/`, service duy
 nhất được ghi field `status`.
 
-`markdown-vault-mcp` **không phải dependency bắt buộc**: chỉ adopt nếu Gate 0 chứng minh
-đủ 4 tiêu chí ở D-04, không đạt thì implementation nội bộ vốn đã đủ.
+`markdown-vault-mcp` **không phải dependency bắt buộc**. Prototype trên corpus production
+đã pass điều kiện adopt `v3.1.0` như private index engine sau policy; xem
+[`../prototypes/NOTES.md`](../prototypes/NOTES.md). Không expose MCP upstream. Production
+Gate 3 vẫn phải absorb seam + tests và chạy retrieval evaluation.
 
 Trạng thái: **stub.**
