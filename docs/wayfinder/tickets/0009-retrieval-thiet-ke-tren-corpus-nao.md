@@ -3,7 +3,7 @@ id: "0009"
 title: Retrieval thiết kế trên corpus nào
 type: grilling
 status: open
-assignee: ""
+assignee: "codex"
 blocked_by: []
 ---
 
