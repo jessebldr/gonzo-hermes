@@ -66,6 +66,9 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
   tách thật nhưng process/local backend không sandbox filesystem. Boundary production là
   Docker no-mount per profile; raw vault chỉ qua policy seam. Config lifecycle của
   terminal/file/execute-code đã dùng chung contract và full runtime probe pass 7/7.
+- [Log rò credential của WS](tickets/0021-log-ro-credential-cua-ws.md) — logger boundary
+  của SDK Lark ép strict-redact `access_key`/`ticket` bất kể config preference; runtime WS
+  thật xác nhận secret bị che còn endpoint và public diagnostic params vẫn dùng được.
 
 ## Fog
 

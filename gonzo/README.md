@@ -54,7 +54,7 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `pyproject.toml` | Đăng ký package `gonzo` vào `packages.find`, thêm `gonzo/tests` vào `testpaths` | khung ban đầu |
 | `docs/architecture/hermes-vault-agent-team-architecture.md` | Runtime evidence supersede D-01/D-03 bằng hybrid personal agents + Docker filesystem boundary | pending — ADR 0003 |
 | `docs/architecture/decisions/0003-hybrid-personal-agents-va-filesystem-boundary.md` | Decision record cho topology và boundary đã test thật; file fork-owned, không có upstream counterpart | pending — ADR 0003 |
-| `docs/wayfinder/map.md` | Ghi decision ADR 0003 và cập nhật fog RAM/topology | pending — ADR 0003 |
+| `docs/wayfinder/map.md` | Ghi decision ADR 0003, credential-log boundary và cập nhật fog RAM/topology | pending — ADR 0003 + WS log fix |
 | `docs/wayfinder/tickets/0022-profile-khong-phai-filesystem-boundary.md` | Đóng prototype ticket bằng runtime evidence | pending — ADR 0003 |
 | `docs/wayfinder/tickets/0023-file-tools-lam-roi-docker-lifecycle-config.md` | Đóng config propagation bug bằng tests + runtime probe 7/7 | pending — lifecycle fix |
 | `tools/terminal_tool.py` | Một shared container-config builder cho mọi environment creation path | pending — lifecycle fix |
@@ -63,5 +63,8 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `tests/tools/test_file_tools_container_config.py` | Pin exact file-first container contract bằng non-default values | pending — lifecycle fix |
 | `tests/tools/test_code_execution_container_config.py` | Pin exact execute-first container contract bằng non-default values | pending — lifecycle fix |
 | `tests/tools/test_docker_network_config.py` | Thay AST change-detector bằng behavioral contract trên shared builder | pending — lifecycle fix |
-| `plugins/platforms/feishu/adapter.py` | Card action: dùng `context.open_message_id` thay cho card token (`c-…`), resolve `thread_id` của topic, và không phát `/card` (lệnh không ai đăng ký). Bắt buộc vì Lark Topic-mode không có định vị theo message — [ADR 0002](../docs/architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md) | `test_feishu_card_action_addressing.py` |
+| `agent/redact.py` | Strict URL boundary nhận diện `access_key` và authentication `ticket`; default URL behavior không đổi | `test_redact.py` + `test_feishu_logging.py` |
+| `plugins/platforms/feishu/adapter.py` | Card action: dùng `context.open_message_id` thay cho card token (`c-…`), resolve `thread_id` của topic, và không phát `/card` (lệnh không ai đăng ký). Bắt buộc vì Lark Topic-mode không có định vị theo message — [ADR 0002](../docs/architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md). Logger boundary ép che credential WS do SDK tự in | `test_feishu_card_action_addressing.py` + `test_feishu_logging.py` |
 | `tests/gateway/test_feishu_approval_buttons.py` | Một test pin hành vi `/card` cũ; sửa để pin **ý định** (click tới được agent, `value` sống sót) thay vì tiền tố slash | chính nó |
+| `tests/gateway/test_feishu_logging.py` | Pin invariant log WS thật: credential bị che, endpoint và public diagnostic params còn nguyên, không phụ thuộc redaction preference | chính nó |
+| `docs/wayfinder/tickets/0021-log-ro-credential-cua-ws.md` | Ghi root cause, boundary và runtime proof của credential-log fix | ticket này |

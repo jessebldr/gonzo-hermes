@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Ported from nearai/ironclaw#2529 — catches tokens whose values don't match
 # any known vendor prefix regex (e.g. opaque tokens, short OAuth codes).
 _SENSITIVE_QUERY_PARAMS = frozenset({
+    "access_key",
     "access_token",
     "refresh_token",
     "id_token",
@@ -34,6 +35,7 @@ _SENSITIVE_QUERY_PARAMS = frozenset({
     "key",
     "code",           # OAuth authorization codes
     "signature",      # pre-signed URL signatures
+    "ticket",         # short-lived connection/authentication tickets
     "x-amz-signature",
 })
 

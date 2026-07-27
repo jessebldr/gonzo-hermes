@@ -142,10 +142,43 @@ from gateway.platforms.base import (
     cache_image_from_bytes,
 )
 from gateway.status import acquire_scoped_lock, release_scoped_lock
+from agent.redact import redact_sensitive_text
 from hermes_constants import get_hermes_home
 from utils import atomic_json_write, env_float, env_int
 
 logger = logging.getLogger(__name__)
+
+
+class _LarkCredentialFilter(logging.Filter):
+    """Force-redact connection credentials emitted by the official SDK."""
+
+    _hermes_lark_credential_filter = True
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            record.msg = redact_sensitive_text(
+                record.getMessage(),
+                force=True,
+                redact_url_credentials=True,
+            )
+        except Exception:
+            record.msg = "Lark SDK log omitted because credential redaction failed"
+        record.args = ()
+        return True
+
+
+def _install_lark_credential_filter() -> None:
+    """Protect both the SDK stdout handler and logs propagated to Hermes."""
+    lark_logger = logging.getLogger("Lark")
+    if any(
+        getattr(existing, "_hermes_lark_credential_filter", False)
+        for existing in lark_logger.filters
+    ):
+        return
+    lark_logger.addFilter(_LarkCredentialFilter())
+
+
+_install_lark_credential_filter()
 
 # ---------------------------------------------------------------------------
 # Regex patterns
