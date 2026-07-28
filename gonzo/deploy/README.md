@@ -44,10 +44,13 @@ probes trên chính config deployed đều pass: tool path không đọc đượ
 listener hay có remote credential surface. Agent core/Lark gateway chạy trên host và spawn
 policy child theo capability pipe; vault source/index không được expose cho model.
 
-`hermes mcp test gonzo_vault` đã connect và discover đúng một tool. Gateway được restart
-chính thức dưới launchd (không còn detached process), Feishu WS connected, và startup log
-đã đăng ký `mcp__gonzo_vault__vault_query`. Chưa thêm user thứ hai trước khi
-`session_search` được disable hoặc scope.
+`hermes mcp test gonzo_vault` đã connect và discover đúng một tool. Feishu WS connected,
+và startup log đã đăng ký `mcp__gonzo_vault__vault_query`. Launchd **chưa được verify**:
+plist `ai.hermes.gateway.plist` tồn tại nhưng `launchctl print gui/501/ai.hermes.gateway`
+không tìm thấy service; pilot trước đó là một process orphan dưới PID 1. Vì vậy gateway
+pilot hiện được restart thủ công bằng đúng entrypoint, còn launchd bootstrap/KeepAlive vẫn
+là việc phải làm riêng — không được ghi là production fact. Chưa thêm user thứ hai trước
+khi `session_search` được disable hoặc scope.
 
 Runtime dependency không cài bằng các `--with ...==...` rời rạc. Range + upper bound nằm
 trong `gonzo/vault_policy/pyproject.toml`; `uv.lock` pin resolution + hash; launcher dùng

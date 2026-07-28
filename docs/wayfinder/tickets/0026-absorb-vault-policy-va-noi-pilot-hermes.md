@@ -51,8 +51,10 @@ thật qua Lark như thế nào?
   `File not found`; Docker volume args không chứa vault.
 - Opt-in production E2E chạy qua canonical runner: temp git vault → locked launcher → real
   dependency/index/embedding → stdio MCP → sanitized cited result, `1/1` pass.
-- Gateway đã chuyển từ detached process sang launchd, Feishu WS connected và startup
-  register `mcp__gonzo_vault__vault_query`.
+- Feishu WS connected và startup register `mcp__gonzo_vault__vault_query`. Claim cũ rằng
+  gateway đã chuyển sang launchd chưa được verify: plist tồn tại nhưng
+  `launchctl print gui/501/ai.hermes.gateway` không tìm thấy service; pilot process thực tế
+  từng là orphan dưới PID 1. Launchd bootstrap/KeepAlive được tách thành việc deploy riêng.
 
 ## Resolution
 
