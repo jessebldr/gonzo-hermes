@@ -72,6 +72,9 @@ chmod 600 ~/.hermes/gonzo-runtime.yaml
 $EDITOR ~/.hermes/gonzo-runtime.yaml
 ```
 
+Loader enforce mode đúng `0600`; file rộng hơn sẽ bị từ chối trước khi render route,
+bootstrap profile hoặc ghi config.
+
 Dry-run trước, rồi mới ghi:
 
 ```bash

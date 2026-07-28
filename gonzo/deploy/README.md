@@ -49,12 +49,11 @@ listener hay có remote credential surface. Agent core/Lark gateway chạy trên
 policy child theo capability pipe; vault source/index không được expose cho model.
 
 `hermes mcp test gonzo_vault` đã connect và discover đúng một tool. Feishu WS connected,
-và startup log đã đăng ký `mcp__gonzo_vault__vault_query`. Launchd **chưa được verify**:
-plist `ai.hermes.gateway.plist` tồn tại nhưng `launchctl print gui/501/ai.hermes.gateway`
-không tìm thấy service; pilot trước đó là một process orphan dưới PID 1. Vì vậy gateway
-pilot hiện được restart thủ công bằng đúng entrypoint, còn launchd bootstrap/KeepAlive vẫn
-là việc phải làm riêng — không được ghi là production fact. Chưa thêm user thứ hai trước
-khi `session_search` được disable hoặc scope.
+và startup log đã đăng ký `mcp__gonzo_vault__vault_query`. Gateway pilot hiện chạy dưới
+launchd user service `gui/501/ai.hermes.gateway`; `launchctl print` xác nhận service active
+với KeepAlive, và live log xác nhận inbound → response ready → outbound. `session_search`
+đã scope theo principal/profile/topic, nhưng chưa thêm user thứ hai trước khi deploy boundary
+này từ release tag và chạy canary hai principal thật.
 
 Runtime dependency không cài bằng các `--with ...==...` rời rạc. Range + upper bound nằm
 trong `gonzo/vault_policy/pyproject.toml`; `uv.lock` pin resolution + hash; launcher dùng
@@ -70,4 +69,5 @@ runtime thật sự đọc — **chỉ** đọc `$HERMES_HOME/config.yaml`. Đ�
 thấy mà agent không, và triệu chứng là `No inference provider configured` dù config trông
 hoàn toàn đúng. Đây là một giờ debug đã trả rồi; đừng trả lại.
 
-Trạng thái phần còn lại (launchd, backup/restore, rollback): **stub.**
+Trạng thái phần còn lại: launchd pilot đã chạy; release-worktree deploy, health-check script,
+backup/restore và rollback reproducible vẫn là **stub**.

@@ -11,7 +11,21 @@ from gonzo.profiles.runtime_map import load_runtime_map
 
 def _write(path: Path, content: str) -> Path:
     path.write_text(content, encoding="utf-8")
+    path.chmod(0o600)
     return path
+
+
+def test_runtime_map_rejects_group_or_other_permissions(tmp_path):
+    path = _write(
+        tmp_path / "runtime.yaml",
+        "profiles:\n"
+        "  - name: personal-a\n"
+        "    seed: fresh\n",
+    )
+    path.chmod(0o640)
+
+    with pytest.raises(ValueError, match="0600"):
+        load_runtime_map(path)
 
 
 def test_runtime_map_rejects_invalid_profile_name(tmp_path):

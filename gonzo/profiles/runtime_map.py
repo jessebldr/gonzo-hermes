@@ -76,7 +76,14 @@ def load_runtime_map(path: Path) -> RuntimeMap:
     """Load and validate a private runtime map."""
 
     try:
+        mode = path.stat().st_mode & 0o777
+        if mode != 0o600:
+            raise ValueError(
+                f"runtime map {path} must have mode 0600 (found {mode:04o})"
+            )
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except ValueError:
+        raise
     except OSError as exc:
         raise ValueError(f"cannot read runtime map {path}: {exc}") from exc
     data = _require_mapping(raw, label="runtime map")

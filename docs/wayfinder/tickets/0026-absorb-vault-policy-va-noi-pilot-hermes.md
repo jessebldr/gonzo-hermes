@@ -51,10 +51,10 @@ thật qua Lark như thế nào?
   `File not found`; Docker volume args không chứa vault.
 - Opt-in production E2E chạy qua canonical runner: temp git vault → locked launcher → real
   dependency/index/embedding → stdio MCP → sanitized cited result, `1/1` pass.
-- Feishu WS connected và startup register `mcp__gonzo_vault__vault_query`. Claim cũ rằng
-  gateway đã chuyển sang launchd chưa được verify: plist tồn tại nhưng
-  `launchctl print gui/501/ai.hermes.gateway` không tìm thấy service; pilot process thực tế
-  từng là orphan dưới PID 1. Launchd bootstrap/KeepAlive được tách thành việc deploy riêng.
+- Feishu WS connected và startup register `mcp__gonzo_vault__vault_query`. Sau lần kiểm tra
+  ban đầu còn thấy process orphan dưới PID 1, pilot đã được bootstrap lại dưới launchd
+  `gui/501/ai.hermes.gateway`; `launchctl print` xác nhận service active + KeepAlive và live
+  log xác nhận Lark WebSocket connected.
 
 ## Resolution
 
@@ -81,6 +81,8 @@ Raw vault vẫn không mount vào Docker, model chỉ thấy reread excerpts + `
 spawn/pipe là capability boundary thay cho một network credential giả tạo. Locked runtime,
 behavioral/transport/truth tests và production E2E đều pass; gateway chạy dưới launchd.
 
-Tripwire giữ nguyên: chưa thêm user Lark thứ hai trước khi scope hoặc disable
-`session_search`, vì implementation hiện không lọc `user_id` và còn hỗ trợ cross-profile
-lookup.
+Tripwire `session_search` đã được giải ở
+[Phạm vi của session_search](0018-pham-vi-cua-session-search.md): messaging recall fail
+closed theo principal/profile/topic và không cho model chọn profile khác. Người thứ hai vẫn
+chưa được thêm cho tới khi bản chứa boundary này được deploy từ release tag và canary hai
+principal thật pass.

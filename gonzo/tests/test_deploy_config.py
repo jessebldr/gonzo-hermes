@@ -100,6 +100,7 @@ def test_private_runtime_map_enables_principal_routes_without_committing_ids(tmp
         "    profile: shared-task\n",
         encoding="utf-8",
     )
+    runtime_map.chmod(0o600)
     env = os.environ.copy()
     env["HERMES_HOME"] = str(pilot_home)
     env["GONZO_VAULT_ROOT"] = str(vault_root)
@@ -180,6 +181,7 @@ def test_profile_bootstrap_preserves_only_clone_default_memory_and_scopes_secret
         "    profile: shared-task\n",
         encoding="utf-8",
     )
+    runtime_map.chmod(0o600)
 
     completed = subprocess.run(
         [
