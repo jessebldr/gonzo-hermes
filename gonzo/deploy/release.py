@@ -78,6 +78,7 @@ def install_launchd_plist(
     plist_path: Path,
     payload: bytes,
     launchctl: str = "launchctl",
+    launchd_domain: str = "user/501",
     dry_run: bool = False,
 ) -> Path | None:
     """Install and load a plist, retaining a recoverable backup.
@@ -93,22 +94,26 @@ def install_launchd_plist(
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     if plist_path.exists():
         shutil.copy2(plist_path, backup)
-        subprocess.run([launchctl, "unload", str(plist_path)], check=False)
+        subprocess.run([launchctl, "bootout", launchd_domain, str(plist_path)], check=False)
     temporary = plist_path.with_suffix(plist_path.suffix + ".tmp")
     temporary.write_bytes(payload)
     temporary.replace(plist_path)
     try:
-        subprocess.run([launchctl, "load", str(plist_path)], check=True)
+        subprocess.run([launchctl, "bootstrap", launchd_domain, str(plist_path)], check=True)
     except Exception:
         if backup.exists():
             shutil.copy2(backup, plist_path)
-            subprocess.run([launchctl, "load", str(plist_path)], check=False)
+            subprocess.run([launchctl, "bootstrap", launchd_domain, str(plist_path)], check=False)
         raise
     return backup if backup.exists() else None
 
 
 def rollback_launchd_plist(
-    *, plist_path: Path, launchctl: str = "launchctl", dry_run: bool = False
+    *,
+    plist_path: Path,
+    launchctl: str = "launchctl",
+    launchd_domain: str = "user/501",
+    dry_run: bool = False,
 ) -> bool:
     """Restore the last plist backup and load it."""
     plist_path = Path(plist_path).expanduser()
@@ -117,9 +122,9 @@ def rollback_launchd_plist(
         return False
     if dry_run:
         return True
-    subprocess.run([launchctl, "unload", str(plist_path)], check=False)
+    subprocess.run([launchctl, "bootout", launchd_domain, str(plist_path)], check=False)
     shutil.copy2(backup, plist_path)
-    subprocess.run([launchctl, "load", str(plist_path)], check=True)
+    subprocess.run([launchctl, "bootstrap", launchd_domain, str(plist_path)], check=True)
     return True
 
 
