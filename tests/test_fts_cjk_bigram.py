@@ -65,6 +65,68 @@ def test_two_char_korean_hits_cjk_index(db):
     assert rows
 
 
+def test_recall_scope_filters_cjk_index(db):
+    db.create_session(
+        "khanh-current",
+        source="feishu",
+        user_id="u-khanh",
+        user_id_alt="on-khanh",
+        chat_id="dm-khanh",
+        chat_type="dm",
+        profile_name="default",
+    )
+    for session_id, user_id_alt in (
+        ("khanh-old", "on-khanh"),
+        ("son-old", "on-son"),
+    ):
+        db.create_session(
+            session_id,
+            source="feishu",
+            user_id=f"u-{session_id}",
+            user_id_alt=user_id_alt,
+            chat_id=f"dm-{session_id}",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.append_message(session_id, role="user", content="기밀 회의")
+
+    scope = db.recall_scope_for_session("khanh-current")
+    rows = db.search_messages("기밀", recall_scope=scope)
+
+    assert {row["session_id"] for row in rows} == {"khanh-old"}
+
+
+def test_recall_scope_filters_latin_fallback_index(db):
+    db.create_session(
+        "khanh-current-latin",
+        source="feishu",
+        user_id="u-khanh",
+        user_id_alt="on-khanh",
+        chat_id="dm-khanh",
+        chat_type="dm",
+        profile_name="default",
+    )
+    for session_id, user_id_alt in (
+        ("khanh-latin", "on-khanh"),
+        ("son-latin", "on-son"),
+    ):
+        db.create_session(
+            session_id,
+            source="feishu",
+            user_id=f"u-{session_id}",
+            user_id_alt=user_id_alt,
+            chat_id=f"dm-{session_id}",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.append_message(session_id, role="user", content="修改youer服务端")
+
+    scope = db.recall_scope_for_session("khanh-current-latin")
+    rows = db.search_messages("youer", recall_scope=scope)
+
+    assert {row["session_id"] for row in rows} == {"khanh-latin"}
+
+
 def test_mixed_and_ascii_queries(db):
     assert db.search_messages("graphiti", limit=10)
     assert db.search_messages('"shared default" AND 웅기', limit=10)

@@ -238,11 +238,12 @@ class TestSessionLifecycle:
         the gateway re-records the peer can't strand it (#59527)."""
         db.create_session(
             session_id="parent", source="telegram",
-            user_id="u1", session_key="telegram:u1:c1",
+            user_id="u1", user_id_alt="stable-u1",
+            session_key="telegram:u1:c1",
             chat_id="c1", chat_type="private", thread_id="t1",
         )
         db.record_gateway_session_peer(
-            "parent", source="telegram", user_id="u1",
+            "parent", source="telegram", user_id="u1", user_id_alt="stable-u1",
             session_key="telegram:u1:c1", chat_id="c1", chat_type="private",
             thread_id="t1", display_name="Chat One", origin_json='{"p":"telegram"}',
         )
@@ -256,6 +257,7 @@ class TestSessionLifecycle:
 
         child = db.get_session("child")
         assert child["user_id"] == "u1"
+        assert child["user_id_alt"] == "stable-u1"
         assert child["session_key"] == "telegram:u1:c1"
         assert child["chat_id"] == "c1"
         assert child["chat_type"] == "private"
@@ -789,6 +791,31 @@ class TestSessionLifecycle:
             assert rows[0]["output_tokens"] == 567
         finally:
             db2.close()
+
+    def test_v24_backfills_gateway_user_id_alt_from_origin_json(self, tmp_path):
+        db_path = tmp_path / "legacy-user-id-alt.db"
+        db = SessionDB(db_path=db_path)
+        db.create_session(
+            "legacy-feishu",
+            source="feishu",
+            user_id="ou-legacy",
+            chat_id="dm-legacy",
+            chat_type="dm",
+        )
+        db._conn.execute(
+            "UPDATE sessions SET origin_json = ?, user_id_alt = NULL WHERE id = ?",
+            (json.dumps({"user_id": "ou-legacy", "user_id_alt": "on-stable"}),
+             "legacy-feishu"),
+        )
+        db._conn.execute("UPDATE schema_version SET version = 23")
+        db._conn.commit()
+        db.close()
+
+        migrated = SessionDB(db_path=db_path)
+        try:
+            assert migrated.get_session("legacy-feishu")["user_id_alt"] == "on-stable"
+        finally:
+            migrated.close()
 
     def test_parent_session(self, db):
         db.create_session(session_id="parent", source="cli")
@@ -2125,6 +2152,36 @@ class TestFTS5Search:
         # Should only find the telegram message
         sources = [r["source"] for r in results]
         assert all(s == "telegram" for s in sources)
+
+    def test_recall_scope_filters_cjk_like_fallback(self, db):
+        db.create_session(
+            "khanh-current",
+            source="feishu",
+            user_id="u-khanh",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh",
+            chat_type="dm",
+            profile_name="default",
+        )
+        for session_id, user_id_alt in (
+            ("khanh-old", "on-khanh"),
+            ("son-old", "on-son"),
+        ):
+            db.create_session(
+                session_id,
+                source="feishu",
+                user_id=f"u-{session_id}",
+                user_id_alt=user_id_alt,
+                chat_id=f"dm-{session_id}",
+                chat_type="dm",
+                profile_name="default",
+            )
+            db.append_message(session_id, role="user", content="秘密")
+
+        scope = db.recall_scope_for_session("khanh-current")
+        results = db.search_messages("密", recall_scope=scope)
+
+        assert {row["session_id"] for row in results} == {"khanh-old"}
 
     def test_search_default_sources_include_acp(self, db):
         db.create_session(session_id="s1", source="acp")
@@ -7563,4 +7620,3 @@ class TestDisplayMetadataReadPaths:
             }],
         )
         assert db.get_messages_as_conversation("s1")[0]["display_metadata"] == self.META
-

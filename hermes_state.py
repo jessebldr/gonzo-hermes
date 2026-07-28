@@ -24,6 +24,7 @@ import sqlite3
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from agent.memory_manager import sanitize_context
@@ -213,7 +214,23 @@ T = TypeVar("T")
 
 DEFAULT_DB_PATH = get_hermes_home() / "state.db"
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
+
+
+@dataclass(frozen=True)
+class SessionRecallScope:
+    """Trusted boundary for user-facing conversation-history recall.
+
+    DM recall follows the same platform principal across that profile. Shared
+    chats recall only the exact chat/thread. The model never constructs this
+    object; it is derived from the active gateway session row.
+    """
+
+    source: str
+    profile_name: str = "default"
+    user_ids: Tuple[str, ...] = ()
+    chat_id: Optional[str] = None
+    thread_id: Optional[str] = None
 
 # FTS storage-layout version, tracked INDEPENDENTLY of SCHEMA_VERSION in the
 # state_meta key ``fts_storage_version``. The main schema version advances
@@ -1051,6 +1068,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     source TEXT NOT NULL,
     user_id TEXT,
+    user_id_alt TEXT,
     session_key TEXT,
     chat_id TEXT,
     chat_type TEXT,
@@ -1213,6 +1231,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_session_key
     ON sessions(session_key, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_gateway_peer
     ON sessions(source, user_id, chat_id, chat_type, thread_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_recall_user_alt
+    ON sessions(source, profile_name, chat_type, user_id_alt, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_handoff_state
     ON sessions(handoff_state, started_at);
 """
@@ -3225,6 +3245,28 @@ class SessionDB:
                 if fts5_available and self._db_has_legacy_inline_fts(cursor):
                     self.set_meta("fts_optimize_available", "1", cursor=cursor)
 
+            if current_version < 24:
+                # v24: preserve the gateway's stable alternate participant ID
+                # (Feishu union_id, Signal UUID) as a first-class session
+                # column. Older rows already carry it in origin_json.
+                try:
+                    cursor.execute(
+                        """UPDATE sessions
+                           SET user_id_alt = json_extract(origin_json, '$.user_id_alt')
+                           WHERE user_id_alt IS NULL
+                             AND json_valid(COALESCE(origin_json, ''))
+                             AND json_extract(origin_json, '$.user_id_alt') IS NOT NULL"""
+                    )
+                    cursor.execute(
+                        """UPDATE sessions
+                           SET user_id = json_extract(origin_json, '$.user_id')
+                           WHERE user_id IS NULL
+                             AND json_valid(COALESCE(origin_json, ''))
+                             AND json_extract(origin_json, '$.user_id') IS NOT NULL"""
+                    )
+                except sqlite3.OperationalError:
+                    pass
+
             # The FTS storage layout is versioned independently of the main
             # schema (see the v23 note above). Stamp the current layout so the
             # main version can always advance: a fresh/optimized DB is at
@@ -3368,6 +3410,7 @@ class SessionDB:
         model_config: Dict[str, Any] = None,
         system_prompt: str = None,
         user_id: str = None,
+        user_id_alt: str = None,
         session_key: str = None,
         chat_id: str = None,
         chat_type: str = None,
@@ -3415,15 +3458,17 @@ class SessionDB:
         def _do(conn):
             conn.execute(
                 """INSERT INTO sessions (
-                   id, source, user_id, session_key, chat_id, chat_type, thread_id,
+                   id, source, user_id, user_id_alt, session_key, chat_id, chat_type, thread_id,
                    model, model_config, system_prompt, parent_session_id, cwd,
                    profile_name, git_repo_root, started_at
                 )
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(id) DO UPDATE SET
                        model = COALESCE(sessions.model, excluded.model),
                        model_config = COALESCE(sessions.model_config, excluded.model_config),
                        system_prompt = COALESCE(sessions.system_prompt, excluded.system_prompt),
+                       user_id = COALESCE(sessions.user_id, excluded.user_id),
+                       user_id_alt = COALESCE(sessions.user_id_alt, excluded.user_id_alt),
                        session_key = COALESCE(sessions.session_key, excluded.session_key),
                        chat_id = COALESCE(sessions.chat_id, excluded.chat_id),
                        chat_type = COALESCE(sessions.chat_type, excluded.chat_type),
@@ -3436,6 +3481,7 @@ class SessionDB:
                     session_id,
                     source,
                     user_id,
+                    user_id_alt,
                     session_key,
                     chat_id,
                     chat_type,
@@ -3484,6 +3530,9 @@ class SessionDB:
                        SET user_id = COALESCE(sessions.user_id,
                                      (SELECT p.user_id FROM sessions p
                                        WHERE p.id = sessions.parent_session_id)),
+                           user_id_alt = COALESCE(sessions.user_id_alt,
+                                         (SELECT p.user_id_alt FROM sessions p
+                                           WHERE p.id = sessions.parent_session_id)),
                            session_key = COALESCE(sessions.session_key,
                                          (SELECT p.session_key FROM sessions p
                                            WHERE p.id = sessions.parent_session_id)),
@@ -3523,6 +3572,7 @@ class SessionDB:
         *,
         source: str,
         user_id: str = None,
+        user_id_alt: str = None,
         session_key: str = None,
         chat_id: str = None,
         chat_type: str = None,
@@ -3544,7 +3594,7 @@ class SessionDB:
         def _do(conn):
             conn.execute(
                 """UPDATE sessions
-                   SET session_key = ?, source = ?, user_id = ?, chat_id = ?,
+                   SET session_key = ?, source = ?, user_id = ?, user_id_alt = ?, chat_id = ?,
                        chat_type = ?, thread_id = ?,
                        display_name = COALESCE(?, display_name),
                        origin_json = COALESCE(?, origin_json)
@@ -3553,6 +3603,7 @@ class SessionDB:
                     session_key,
                     source,
                     user_id,
+                    user_id_alt,
                     chat_id,
                     chat_type,
                     thread_id,
@@ -3800,6 +3851,7 @@ class SessionDB:
         *,
         source: str,
         user_id: Optional[str] = None,
+        user_id_alt: Optional[str] = None,
         session_key: Optional[str] = None,
         chat_id: Optional[str] = None,
         chat_type: Optional[str] = None,
@@ -3845,7 +3897,10 @@ class SessionDB:
                 """
                 SELECT * FROM sessions
                 WHERE source = ?
-                  AND COALESCE(user_id, '') = COALESCE(?, '')
+                  AND (
+                      COALESCE(user_id, '') IN (COALESCE(?, ''), COALESCE(?, ''))
+                      OR COALESCE(user_id_alt, '') IN (COALESCE(?, ''), COALESCE(?, ''))
+                  )
                   AND COALESCE(chat_id, '') = COALESCE(?, '')
                   AND COALESCE(chat_type, '') = COALESCE(?, '')
                   AND COALESCE(thread_id, '') = COALESCE(?, '')
@@ -3856,7 +3911,16 @@ class SessionDB:
                 ORDER BY started_at DESC
                 LIMIT 1
                 """,
-                (source, user_id, chat_id, chat_type, thread_id),
+                (
+                    source,
+                    user_id,
+                    user_id_alt,
+                    user_id,
+                    user_id_alt,
+                    chat_id,
+                    chat_type,
+                    thread_id,
+                ),
             ).fetchone()
         return dict(row) if row else None
 
@@ -3936,7 +4000,7 @@ class SessionDB:
                 )
             parent = conn.execute(
                 """SELECT ended_at, cwd, git_branch, git_repo_root,
-                          user_id, session_key, chat_id, chat_type,
+                          user_id, user_id_alt, session_key, chat_id, chat_type,
                           thread_id, display_name, origin_json, profile_name
                    FROM sessions WHERE id = ?""",
                 (parent_session_id,),
@@ -3952,9 +4016,9 @@ class SessionDB:
                 """INSERT INTO sessions (
                    id, source, model, model_config, system_prompt,
                    parent_session_id, cwd, git_branch, git_repo_root,
-                   profile_name, user_id, session_key, chat_id, chat_type,
-                   thread_id, display_name, origin_json, started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   profile_name, user_id, user_id_alt, session_key, chat_id,
+                   chat_type, thread_id, display_name, origin_json, started_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     child_session_id,
                     source,
@@ -3972,6 +4036,7 @@ class SessionDB:
                     # still works after a crash at the boundary.
                     profile_name or parent["profile_name"],
                     parent["user_id"],
+                    parent["user_id_alt"],
                     parent["session_key"],
                     parent["chat_id"],
                     parent["chat_type"],
@@ -5039,6 +5104,106 @@ class SessionDB:
             row = cursor.fetchone()
         return dict(row) if row else None
 
+    @staticmethod
+    def _recall_scope_sql(
+        scope: SessionRecallScope,
+        *,
+        alias: str = "s",
+    ) -> Tuple[str, List[Any]]:
+        """Return a SQL predicate for a trusted recall scope."""
+        clauses = [
+            f"{alias}.source = ?",
+            f"COALESCE({alias}.profile_name, 'default') = ?",
+        ]
+        params: List[Any] = [scope.source, scope.profile_name or "default"]
+
+        if scope.user_ids:
+            placeholders = ",".join("?" for _ in scope.user_ids)
+            clauses.append(
+                f"{alias}.chat_type = 'dm' AND "
+                f"({alias}.user_id IN ({placeholders}) OR "
+                f"{alias}.user_id_alt IN ({placeholders}))"
+            )
+            params.extend(scope.user_ids)
+            params.extend(scope.user_ids)
+        elif scope.chat_id:
+            clauses.append(f"{alias}.chat_id = ?")
+            params.append(scope.chat_id)
+            clauses.append(f"COALESCE({alias}.thread_id, '') = ?")
+            params.append(scope.thread_id or "")
+        else:
+            clauses.append("0 = 1")
+
+        return " AND ".join(clauses), params
+
+    def recall_scope_for_session(
+        self,
+        session_id: str,
+    ) -> Optional[SessionRecallScope]:
+        """Derive a user-facing recall boundary from a gateway session row.
+
+        CLI/admin sessions have no chat metadata and intentionally return
+        ``None``. Gateway DMs follow the participant across that profile;
+        shared chats are limited to the exact chat/thread.
+        """
+        row = self.get_session(session_id)
+        if not row or not row.get("chat_type"):
+            return None
+
+        profile_name = str(row.get("profile_name") or "default")
+        source = str(row.get("source") or "")
+        if not source:
+            return None
+        chat_type = str(row.get("chat_type") or "").lower()
+        if chat_type == "dm":
+            ids: List[str] = []
+            for key in ("user_id_alt", "user_id"):
+                value = row.get(key)
+                if value and str(value) not in ids:
+                    ids.append(str(value))
+            try:
+                origin = json.loads(row.get("origin_json") or "")
+            except (TypeError, ValueError):
+                origin = {}
+            if isinstance(origin, dict):
+                for key in ("user_id_alt", "user_id"):
+                    value = origin.get(key)
+                    if value and str(value) not in ids:
+                        ids.append(str(value))
+            if not ids:
+                return None
+            return SessionRecallScope(
+                source=source,
+                profile_name=profile_name,
+                user_ids=tuple(ids),
+                chat_id=str(row.get("chat_id") or "") or None,
+                thread_id=str(row.get("thread_id") or "") or None,
+            )
+
+        chat_id = str(row.get("chat_id") or "")
+        if not chat_id:
+            return None
+        return SessionRecallScope(
+            source=source,
+            profile_name=profile_name,
+            chat_id=chat_id or None,
+            thread_id=str(row.get("thread_id") or "") or None,
+        )
+
+    def session_matches_recall_scope(
+        self,
+        session_id: str,
+        scope: SessionRecallScope,
+    ) -> bool:
+        """Return whether a session row belongs to a trusted recall scope."""
+        where, params = self._recall_scope_sql(scope)
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT 1 FROM sessions s WHERE s.id = ? AND {where} LIMIT 1",
+                [session_id, *params],
+            ).fetchone()
+        return row is not None
+
     def resolve_session_id(self, session_id_or_prefix: str) -> Optional[str]:
         """Resolve an exact or uniquely prefixed session ID to the full ID.
 
@@ -5543,6 +5708,7 @@ class SessionDB:
         id_query: str = None,
         search_query: str = None,
         compact_rows: bool = False,
+        recall_scope: SessionRecallScope = None,
     ) -> List[Dict[str, Any]]:
         """List sessions with preview (first user message) and last active timestamp.
 
@@ -5611,6 +5777,10 @@ class SessionDB:
             placeholders = ",".join("?" for _ in exclude_sources)
             where_clauses.append(f"s.source NOT IN ({placeholders})")
             params.extend(exclude_sources)
+        if recall_scope is not None:
+            scope_sql, scope_params = self._recall_scope_sql(recall_scope)
+            where_clauses.append(scope_sql)
+            params.extend(scope_params)
         if cwd_prefix:
             clause, clause_params = _cwd_prefix_clause(cwd_prefix)
             where_clauses.append(clause)
@@ -7476,6 +7646,7 @@ class SessionDB:
         source_filter: List[str] = None,
         exclude_sources: List[str] = None,
         role_filter: List[str] = None,
+        recall_scope: SessionRecallScope = None,
         limit: int = 20,
         offset: int = 0,
     ) -> Optional[List[Dict[str, Any]]]:
@@ -7517,6 +7688,10 @@ class SessionDB:
         if role_filter:
             tri_where.append(f"m.role IN ({','.join('?' for _ in role_filter)})")
             tri_params.extend(role_filter)
+        if recall_scope is not None:
+            scope_sql, scope_params = self._recall_scope_sql(recall_scope)
+            tri_where.append(scope_sql)
+            tri_params.extend(scope_params)
         tri_sql = f"""
             SELECT
                 m.id,
@@ -7555,6 +7730,7 @@ class SessionDB:
         offset: int = 0,
         sort: str = None,
         include_inactive: bool = False,
+        recall_scope: SessionRecallScope = None,
     ) -> List[Dict[str, Any]]:
         """Instrumented wrapper around :meth:`_search_messages_impl`.
 
@@ -7575,6 +7751,7 @@ class SessionDB:
                 limit=limit,
                 offset=offset,
                 sort=sort,
+                recall_scope=recall_scope,
                 include_inactive=include_inactive,
             )
             return rows
@@ -7625,6 +7802,7 @@ class SessionDB:
         offset: int = 0,
         sort: str = None,
         include_inactive: bool = False,
+        recall_scope: SessionRecallScope = None,
     ) -> List[Dict[str, Any]]:
         """
         Full-text search across session messages using FTS5.
@@ -7706,6 +7884,11 @@ class SessionDB:
             role_placeholders = ",".join("?" for _ in role_filter)
             where_clauses.append(f"m.role IN ({role_placeholders})")
             params.extend(role_filter)
+
+        if recall_scope is not None:
+            scope_sql, scope_params = self._recall_scope_sql(recall_scope)
+            where_clauses.append(scope_sql)
+            params.extend(scope_params)
 
         where_sql = " AND ".join(where_clauses)
         params.extend([limit, offset])
@@ -7799,6 +7982,10 @@ class SessionDB:
                 if role_filter:
                     cjk_where.append(f"m.role IN ({','.join('?' for _ in role_filter)})")
                     cjk_params.extend(role_filter)
+                if recall_scope is not None:
+                    scope_sql, scope_params = self._recall_scope_sql(recall_scope)
+                    cjk_where.append(scope_sql)
+                    cjk_params.extend(scope_params)
                 cjk_sql = f"""
                     SELECT
                         m.id,
@@ -7888,6 +8075,10 @@ class SessionDB:
                 if role_filter:
                     tri_where.append(f"m.role IN ({','.join('?' for _ in role_filter)})")
                     tri_params.extend(role_filter)
+                if recall_scope is not None:
+                    scope_sql, scope_params = self._recall_scope_sql(recall_scope)
+                    tri_where.append(scope_sql)
+                    tri_params.extend(scope_params)
                 tri_sql = f"""
                     SELECT
                         m.id,
@@ -7982,6 +8173,10 @@ class SessionDB:
                 if role_filter:
                     like_where.append(f"m.role IN ({','.join('?' for _ in role_filter)})")
                     like_params.extend(role_filter)
+                if recall_scope is not None:
+                    scope_sql, scope_params = self._recall_scope_sql(recall_scope)
+                    like_where.append(scope_sql)
+                    like_params.extend(scope_params)
                 like_sql = f"""
                     SELECT m.id, m.session_id, m.role,
                            substr(m.content,
@@ -8041,6 +8236,7 @@ class SessionDB:
                     source_filter=source_filter,
                     exclude_sources=exclude_sources,
                     role_filter=role_filter,
+                    recall_scope=recall_scope,
                 )
                 seen_ids = {m["id"] for m in matches}
                 matches.extend(m for m in gap_matches if m["id"] not in seen_ids)
@@ -8079,6 +8275,7 @@ class SessionDB:
                     source_filter=source_filter,
                     exclude_sources=exclude_sources,
                     role_filter=role_filter,
+                    recall_scope=recall_scope,
                     limit=limit,
                     offset=offset,
                 )
@@ -8096,6 +8293,7 @@ class SessionDB:
                     source_filter=source_filter,
                     exclude_sources=exclude_sources,
                     role_filter=role_filter,
+                    recall_scope=recall_scope,
                     limit=limit,
                     offset=offset,
                 )
@@ -8179,6 +8377,7 @@ class SessionDB:
         source_filter: Optional[List[str]] = None,
         exclude_sources: Optional[List[str]] = None,
         role_filter: Optional[List[str]] = None,
+        recall_scope: SessionRecallScope = None,
     ) -> List[Dict[str, Any]]:
         """LIKE-scan the rows the deferred rebuild hasn't indexed yet.
 
@@ -8224,6 +8423,10 @@ class SessionDB:
         if role_filter:
             where.append(f"m.role IN ({','.join('?' for _ in role_filter)})")
             params.extend(role_filter)
+        if recall_scope is not None:
+            scope_sql, scope_params = self._recall_scope_sql(recall_scope)
+            where.append(scope_sql)
+            params.extend(scope_params)
 
         sql = f"""
             SELECT m.id, m.session_id, m.role,
