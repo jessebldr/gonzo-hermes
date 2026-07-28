@@ -69,5 +69,19 @@ runtime thật sự đọc — **chỉ** đọc `$HERMES_HOME/config.yaml`. Đ�
 thấy mà agent không, và triệu chứng là `No inference provider configured` dù config trông
 hoàn toàn đúng. Đây là một giờ debug đã trả rồi; đừng trả lại.
 
-Trạng thái phần còn lại: launchd pilot đã chạy; release-worktree deploy, health-check script,
-backup/restore và rollback reproducible vẫn là **stub**.
+Release-worktree deploy/rollback đã có trong [`release.py`](release.py). Renderer pin
+`ProgramArguments` vào `<release>/.venv/bin/python`; installer backup plist cũ trước khi
+unload/load, còn rollback khôi phục bản backup cuối. Các helper health-check chỉ coi gateway
+healthy khi PID/program đúng và log mới có đủ startup, Feishu websocket và Lark WS signals.
+
+Ví dụ dry-run (không chạm launchd):
+
+```bash
+python gonzo/deploy/release.py render \
+  --release-root ~/.hermes/releases/gonzo-v0.19.0-pilot.1
+python gonzo/deploy/release.py install \
+  --release-root ~/.hermes/releases/gonzo-v0.19.0-pilot.1 --dry-run
+```
+
+`install` không tự bypass health gate; caller phải chạy `wait_for_gateway_health` sau load và
+gọi `rollback` ngay nếu gate fail. Backup nằm cạnh plist với suffix `.gonzo-backup`.
