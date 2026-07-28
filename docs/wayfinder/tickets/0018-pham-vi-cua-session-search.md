@@ -90,7 +90,7 @@ Implementation đi theo ba seam:
 
 1. `hermes_state.py` schema v24 lưu `user_id_alt`, backfill từ `origin_json`, giữ identity
    qua conflict enrichment/compression và áp scope vào FTS, CJK, trigram, LIKE, Latin
-   fallback, deferred-gap scan và browse (`e9e41852d`).
+   fallback, deferred-gap scan và browse (`e9e41852d`, alias-preservation fix `1da2e470b`).
 2. `session_search` kiểm ownership cho discover/browse/read/scroll và bỏ profile khỏi model
    surface (`263f051e3`).
 3. Gateway + lazy agent-session creation persist đủ `user_id`, `user_id_alt`, session/chat/

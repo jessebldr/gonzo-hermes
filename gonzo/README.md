@@ -76,8 +76,8 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `docs/wayfinder/tickets/0014-markdown-vault-mcp-adopt-hay-tu-viet.md` | Chốt adopt có điều kiện private index engine, không expose MCP surface upstream | ticket này |
 | `docs/wayfinder/tickets/0025-chung-minh-markdown-vault-mcp-sau-vault-policy.md` | Prototype gate trước khi giữ dependency index cho Gate 3 | ticket này |
 | `docs/wayfinder/tickets/0026-absorb-vault-policy-va-noi-pilot-hermes.md` | Absorb read-only policy seam, deploy stdio MCP hẹp và ghi runtime canary của pilot | ticket này |
-| `hermes_state.py` | Schema v24 lưu alternate principal ID và áp recall scope vào toàn bộ browse/FTS/CJK/trigram/LIKE/fallback paths | `e9e41852d` |
-| `tests/test_hermes_state.py` | Pin migration, principal scope và identity inheritance qua compression | `e9e41852d` |
+| `hermes_state.py` | Schema v24 lưu alternate principal ID và áp recall scope vào toàn bộ browse/FTS/CJK/trigram/LIKE/fallback paths; preserve alias khi gateway update thiếu trường | `e9e41852d`, `1da2e470b` |
+| `tests/test_hermes_state.py` | Pin migration, principal scope, identity inheritance qua compression và preserve-on-NULL | `e9e41852d`, `1da2e470b` |
 | `tests/test_fts_cjk_bigram.py` | Pin recall scope trên CJK và Latin fallback indexes | `e9e41852d` |
 | `tools/session_search_tool.py` | Enforce ownership cho browse/discover/read/scroll; bỏ model-controlled profile selector | `263f051e3` |
 | `tests/tools/test_session_search.py` | Positive same-principal recall và negative cross-principal/topic/profile/fail-closed contracts | `263f051e3` |
