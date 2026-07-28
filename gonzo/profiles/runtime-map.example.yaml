@@ -1,6 +1,9 @@
 # Copy to ~/.hermes/gonzo-runtime.yaml, chmod 600, then replace fake IDs.
 # The real file is runtime-only and must never be committed.
 
+# Unknown DMs receive a pairing code but no agent/tool access until approved.
+admission_mode: pairing
+
 # The default profile owns the one Lark/Feishu listener. These key NAMES are
 # copied from the operator .env into ~/.hermes/.env; values are never printed.
 default_secret_keys:
@@ -10,9 +13,21 @@ default_secret_keys:
   - FEISHU_HOME_CHANNEL
 
 profiles:
-  # Keep the current owner on the built-in default profile during the pilot so
-  # existing session history remains searchable. Every additional human starts fresh.
-  - name: personal-b
+  # Keep the current operator on built-in default so existing history remains
+  # searchable. Every additional team member starts fresh.
+  - name: trung
+    seed: fresh
+  - name: son
+    seed: fresh
+  - name: quan
+    seed: fresh
+  - name: dung
+    seed: fresh
+  - name: thuat
+    seed: fresh
+  - name: quang
+    seed: fresh
+  - name: lam
     seed: fresh
   - name: shared-task
     seed: fresh
@@ -27,10 +42,11 @@ profile_routes:
     principal_id: on_replace_owner
     profile: default
 
-  - name: personal-b-dm
+  # Add one route per person after pairing exposes a stable union_id.
+  - name: son-dm
     platform: feishu
-    principal_id: on_replace_personal_b
-    profile: personal-b
+    principal_id: on_replace_son
+    profile: son
 
   # Exact owner+bot workspace override. It beats the generic group fallback.
   - name: owner-workspace

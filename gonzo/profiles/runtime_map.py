@@ -25,6 +25,7 @@ from gateway.profile_routing import parse_profile_routes
 
 
 _SEED_MODES = frozenset({"fresh", "clone-default"})
+_ADMISSION_MODES = frozenset({"allowlist", "pairing"})
 _LISTENER_ONLY_SECRET_PREFIXES = ("FEISHU_",)
 
 
@@ -49,6 +50,7 @@ class RuntimeMap:
     profiles: tuple[RuntimeProfile, ...]
     profile_routes: tuple[dict[str, Any], ...]
     default_secret_keys: tuple[str, ...] = ()
+    admission_mode: str = "allowlist"
 
 
 def _require_mapping(value: Any, *, label: str) -> dict[str, Any]:
@@ -87,6 +89,11 @@ def load_runtime_map(path: Path) -> RuntimeMap:
     except OSError as exc:
         raise ValueError(f"cannot read runtime map {path}: {exc}") from exc
     data = _require_mapping(raw, label="runtime map")
+    admission_mode = str(data.get("admission_mode") or "allowlist").strip().lower()
+    if admission_mode not in _ADMISSION_MODES:
+        raise ValueError(
+            f"admission_mode must be one of {sorted(_ADMISSION_MODES)}"
+        )
 
     raw_profiles = data.get("profiles") or []
     if not isinstance(raw_profiles, list):
@@ -245,6 +252,7 @@ def load_runtime_map(path: Path) -> RuntimeMap:
             data.get("default_secret_keys"),
             label="default_secret_keys",
         ),
+        admission_mode=admission_mode,
     )
 
 
@@ -388,7 +396,9 @@ def bootstrap_profiles(
     )
     if has_feishu_routes:
         source_assignments["FEISHU_ALLOWED_USERS"] = (
-            "FEISHU_ALLOWED_USERS=" + ",".join(feishu_principal_ids)
+            "FEISHU_ALLOWED_USERS="
+            if runtime_map.admission_mode == "pairing"
+            else "FEISHU_ALLOWED_USERS=" + ",".join(feishu_principal_ids)
         )
         source_assignments["FEISHU_ALLOW_ALL_USERS"] = "FEISHU_ALLOW_ALL_USERS=false"
         managed_default_keys = (

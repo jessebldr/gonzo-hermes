@@ -3,7 +3,7 @@ id: "0028"
 title: Onboard principal thứ hai và chạy canary cách ly thật
 type: task
 status: open
-assignee: ""
+assignee: "codex"
 blocked_by: []
 ---
 

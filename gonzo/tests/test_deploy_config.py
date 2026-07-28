@@ -236,3 +236,71 @@ def test_profile_bootstrap_preserves_only_clone_default_memory_and_scopes_secret
         assert config["multiplex_profiles"] is False
         assert config["profile_routes"] == []
         assert (profile_home / "bin" / "gonzo-vault-policy-mcp").is_file()
+
+
+def test_profile_bootstrap_pairing_mode_keeps_static_feishu_allowlist_empty(tmp_path):
+    hermes_root = tmp_path / "hermes-home"
+    hermes_root.mkdir()
+    vault_root = tmp_path / "gonzo-vault"
+    vault_root.mkdir()
+    source_env = tmp_path / "source.env"
+    source_env.write_text(
+        "GONZO_9ROUTER_KEY=model-secret\n"
+        "FEISHU_APP_ID=app-id\n"
+        "FEISHU_APP_SECRET=app-secret\n",
+        encoding="utf-8",
+    )
+    runtime_map = tmp_path / "runtime-map.yaml"
+    runtime_map.write_text(
+        "admission_mode: pairing\n"
+        "default_secret_keys:\n"
+        "  - FEISHU_APP_ID\n"
+        "  - FEISHU_APP_SECRET\n"
+        "profiles:\n"
+        "  - name: shared-task\n"
+        "    seed: fresh\n"
+        "profile_routes:\n"
+        "  - name: owner-dm\n"
+        "    platform: feishu\n"
+        "    principal_id: union-owner\n"
+        "    profile: default\n"
+        "  - name: owner-workspace\n"
+        "    platform: feishu\n"
+        "    chat_type: group\n"
+        "    chat_id: oc-owner\n"
+        "    profile: default\n"
+        "  - name: all-groups\n"
+        "    platform: feishu\n"
+        "    chat_type: group\n"
+        "    profile: shared-task\n",
+        encoding="utf-8",
+    )
+    runtime_map.chmod(0o600)
+
+    completed = subprocess.run(
+        [
+            str(REPO / ".venv" / "bin" / "python"),
+            str(REPO / "gonzo" / "profiles" / "runtime_map.py"),
+            "bootstrap",
+            str(runtime_map),
+            "--hermes-root",
+            str(hermes_root),
+            "--repo-root",
+            str(REPO),
+            "--vault-root",
+            str(vault_root),
+            "--source-env",
+            str(source_env),
+            "--write",
+        ],
+        cwd=REPO,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    root_env = (hermes_root / ".env").read_text(encoding="utf-8")
+    assert "FEISHU_ALLOWED_USERS=" in root_env
+    assert "FEISHU_ALLOWED_USERS=union-owner" not in root_env
+    assert "FEISHU_ALLOW_ALL_USERS=false" in root_env

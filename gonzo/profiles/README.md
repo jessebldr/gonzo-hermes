@@ -101,6 +101,12 @@ Route `enabled: false` vẫn được render để staging nhưng không đượ
 không thỏa các invariant bắt buộc ở trên. `enabled` phải là YAML boolean thật, không phải
 chuỗi `"false"`.
 
+Với rollout cả team, đặt `admission_mode: pairing`. Bootstrap vẫn ép
+`FEISHU_ALLOW_ALL_USERS=false` nhưng để `FEISHU_ALLOWED_USERS` rỗng có chủ đích: unknown DM
+chỉ tới pairing handshake, chưa được gọi model/tool. Operator tạo profile fresh trước,
+approve pairing, rồi bind stable `union_id` vào route của profile đó. `allowlist` vẫn là
+default để runtime map cũ giữ nguyên hành vi.
+
 ## Chưa build
 
 - Chưa deploy named profiles thật trên pilot và chưa chạy canary hai principal thật.
