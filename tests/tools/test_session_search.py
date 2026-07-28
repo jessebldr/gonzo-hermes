@@ -84,6 +84,10 @@ class TestSchema:
         params = SESSION_SEARCH_SCHEMA["parameters"]["properties"]
         assert "mode" not in params
 
+    def test_profile_selector_is_not_model_controlled(self):
+        params = SESSION_SEARCH_SCHEMA["parameters"]["properties"]
+        assert "profile" not in params
+
     def test_sort_enum(self):
         params = SESSION_SEARCH_SCHEMA["parameters"]["properties"]
         assert params["sort"]["enum"] == ["newest", "oldest"]
@@ -152,6 +156,36 @@ class TestBrowseShape:
         titles = [r.get("title") for r in result["results"]]
         assert any("Modpack" in (t or "") for t in titles)
 
+    def test_gateway_browse_hides_other_dm_principals(self, db):
+        for session_id, user_id, user_id_alt, title in (
+            ("khanh-current", "u-khanh", "on-khanh", "Current"),
+            ("khanh-old", "ou-khanh-old", "on-khanh", "Khánh private"),
+            ("son-old", "u-son", "on-son", "Sơn private"),
+        ):
+            db.create_session(
+                session_id,
+                source="feishu",
+                user_id=user_id,
+                user_id_alt=user_id_alt,
+                chat_id=f"dm-{session_id}",
+                chat_type="dm",
+                profile_name="default",
+            )
+            db._conn.execute(
+                "UPDATE sessions SET title = ? WHERE id = ?",
+                (title, session_id),
+            )
+            db.append_message(session_id, role="user", content=f"message {session_id}")
+        db._conn.commit()
+
+        result = json.loads(session_search(
+            db=db,
+            current_session_id="khanh-current",
+            enforce_scope=True,
+        ))
+
+        assert [item["session_id"] for item in result["results"]] == ["khanh-old"]
+
 
 # =========================================================================
 # Discovery shape (with query)
@@ -164,6 +198,47 @@ class TestDiscoveryShape:
         assert result["success"] is True
         assert result["mode"] == "discover"
         assert result["count"] >= 1
+
+    def test_gateway_discovery_only_returns_same_dm_principal(self, db):
+        db.create_session(
+            "khanh-current",
+            source="feishu",
+            user_id="u-khanh",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh-current",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.create_session(
+            "khanh-old",
+            source="feishu",
+            user_id="ou-khanh-old",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh-old",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.create_session(
+            "son-old",
+            source="feishu",
+            user_id="u-son",
+            user_id_alt="on-son",
+            chat_id="dm-son",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.append_message("khanh-old", role="user", content="private recall needle")
+        db.append_message("son-old", role="user", content="private recall needle")
+        db._conn.commit()
+
+        result = json.loads(session_search(
+            query="private recall needle",
+            db=db,
+            current_session_id="khanh-current",
+            enforce_scope=True,
+        ))
+
+        assert [hit["session_id"] for hit in result["results"]] == ["khanh-old"]
 
     def test_discovery_result_has_bookends_and_window(self, db):
         _seed_modpack_sessions(db)
@@ -491,6 +566,173 @@ class TestReadShape:
         assert result["truncated"] is True
         assert len(result["messages"]) == 30  # head 20 + tail 10
 
+    def test_gateway_read_rejects_other_dm_principal(self, db):
+        db.create_session(
+            "khanh-current",
+            source="feishu",
+            user_id="u-khanh",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.create_session(
+            "son-old",
+            source="feishu",
+            user_id="u-son",
+            user_id_alt="on-son",
+            chat_id="dm-son",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.append_message("son-old", role="user", content="Sơn private")
+        db._conn.commit()
+
+        result = json.loads(session_search(
+            session_id="son-old",
+            db=db,
+            current_session_id="khanh-current",
+            enforce_scope=True,
+        ))
+
+        assert result["success"] is False
+        assert "scope" in result["error"]
+
+    def test_gateway_read_allows_same_dm_principal_across_sessions(self, db):
+        db.create_session(
+            "khanh-current",
+            source="feishu",
+            user_id="u-khanh-current",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh-current",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.create_session(
+            "khanh-old",
+            source="feishu",
+            user_id="ou-khanh-old",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh-old",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.append_message("khanh-old", role="user", content="Khánh private")
+
+        result = json.loads(session_search(
+            session_id="khanh-old",
+            db=db,
+            current_session_id="khanh-current",
+            enforce_scope=True,
+        ))
+
+        assert result["success"] is True
+        assert result["messages"][0]["content"] == "Khánh private"
+
+    def test_enforced_scope_requires_active_session_id(self, db):
+        result = json.loads(session_search(db=db, enforce_scope=True))
+
+        assert result["success"] is False
+        assert "active session id" in result["error"]
+
+    def test_malformed_gateway_identity_fails_closed(self, db):
+        db.create_session(
+            "broken-current",
+            source="feishu",
+            chat_id="dm-broken",
+            chat_type="dm",
+            profile_name="default",
+        )
+
+        result = json.loads(session_search(
+            db=db,
+            current_session_id="broken-current",
+            enforce_scope=True,
+        ))
+
+        assert result["success"] is False
+        assert "scope unavailable" in result["error"]
+
+    def test_gateway_scroll_rejects_other_dm_principal(self, db):
+        db.create_session(
+            "khanh-current",
+            source="feishu",
+            user_id="u-khanh",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh",
+            chat_type="dm",
+            profile_name="default",
+        )
+        db.create_session(
+            "son-old",
+            source="feishu",
+            user_id="u-son",
+            user_id_alt="on-son",
+            chat_id="dm-son",
+            chat_type="dm",
+            profile_name="default",
+        )
+        anchor = db.append_message("son-old", role="user", content="Sơn private")
+        db.append_message("son-old", role="assistant", content="private answer")
+        db._conn.commit()
+
+        result = json.loads(session_search(
+            session_id="son-old",
+            around_message_id=anchor,
+            db=db,
+            current_session_id="khanh-current",
+            enforce_scope=True,
+        ))
+
+        assert result["success"] is False
+        assert "scope" in result["error"]
+
+    def test_gateway_group_recall_stays_inside_exact_topic(self, db):
+        db.create_session(
+            "shared-current",
+            source="feishu",
+            user_id="u-khanh",
+            user_id_alt="on-khanh",
+            chat_id="group-hermes",
+            chat_type="group",
+            thread_id="topic-a",
+            profile_name="default",
+        )
+        db.create_session(
+            "shared-topic-a-old",
+            source="feishu",
+            user_id="u-son",
+            user_id_alt="on-son",
+            chat_id="group-hermes",
+            chat_type="group",
+            thread_id="topic-a",
+            profile_name="default",
+        )
+        db.create_session(
+            "shared-topic-b",
+            source="feishu",
+            user_id="u-khanh",
+            user_id_alt="on-khanh",
+            chat_id="group-hermes",
+            chat_type="group",
+            thread_id="topic-b",
+            profile_name="default",
+        )
+        for session_id in ("shared-topic-a-old", "shared-topic-b"):
+            db.append_message(session_id, role="user", content="shared topic needle")
+        db._conn.commit()
+
+        result = json.loads(session_search(
+            query="shared topic needle",
+            db=db,
+            current_session_id="shared-current",
+            enforce_scope=True,
+        ))
+
+        assert [hit["session_id"] for hit in result["results"]] == [
+            "shared-topic-a-old"
+        ]
+
 
 # =========================================================================
 # Cross-profile read — `profile` swaps in another profile's DB (read-only)
@@ -522,6 +764,71 @@ class TestCrossProfileRead:
         assert result["success"] is True
         assert result["mode"] == "read"
         assert result["session_meta"]["title"] == "Other Profile Chat"
+
+    def test_messaging_scope_rejects_explicit_cross_profile_read(
+        self, db, tmp_path, monkeypatch
+    ):
+        db.create_session(
+            "khanh-current",
+            source="feishu",
+            user_id="u-khanh",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh",
+            chat_type="dm",
+            profile_name="default",
+        )
+        other_home = tmp_path / "other_home"
+        other_home.mkdir()
+        other = SessionDB(other_home / "state.db")
+        other.create_session(
+            "other-profile-session",
+            source="feishu",
+            user_id="u-khanh",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh",
+            chat_type="dm",
+            profile_name="other",
+        )
+        other.append_message("other-profile-session", role="user", content="private")
+        other.close()
+        self._patch_profiles(monkeypatch, other_home)
+
+        result = json.loads(session_search(
+            session_id="other-profile-session",
+            profile="other",
+            db=db,
+            current_session_id="khanh-current",
+            enforce_scope=True,
+        ))
+
+        assert result["success"] is False
+        assert "cross-profile" in result["error"]
+
+    def test_messaging_scope_rejects_embedded_cross_profile_read(
+        self, db, tmp_path, monkeypatch
+    ):
+        db.create_session(
+            "khanh-current",
+            source="feishu",
+            user_id="u-khanh",
+            user_id_alt="on-khanh",
+            chat_id="dm-khanh",
+            chat_type="dm",
+            profile_name="default",
+        )
+        other_home = tmp_path / "other_home"
+        other_home.mkdir()
+        self._patch_profiles(monkeypatch, other_home)
+
+        result = json.loads(session_search(
+            session_id="other/other-profile-session",
+            db=db,
+            current_session_id="khanh-current",
+            enforce_scope=True,
+        ))
+
+        assert result["success"] is False
+        assert "cross-profile" in result["error"]
 
     def test_bare_id_locates_across_profiles(self, db, tmp_path, monkeypatch):
         # The real-world failure: model dropped the owning profile and passed a

@@ -384,13 +384,19 @@ def _read_session(db, session_id: str, head: int = 20, tail: int = 10) -> str:
     return json.dumps(response, ensure_ascii=False)
 
 
-def _list_recent_sessions(db, limit: int, current_session_id: str = None) -> str:
+def _list_recent_sessions(
+    db,
+    limit: int,
+    current_session_id: str = None,
+    recall_scope=None,
+) -> str:
     """Return metadata for the most recent sessions (no LLM calls, no FTS5)."""
     try:
         sessions = db.list_sessions_rich(
             limit=limit + 5,
             exclude_sources=list(_HIDDEN_SESSION_SOURCES),
             order_by_last_active=True,
+            recall_scope=recall_scope,
         )  # fetch extra so we can skip current
 
         current_root = _resolve_lineage(db, current_session_id) if current_session_id else None
@@ -433,6 +439,7 @@ def _scroll(
     around_message_id: int,
     window: int = 5,
     current_session_id: str = None,
+    recall_scope=None,
 ) -> str:
     """Scroll shape: return a window of messages centered on an anchor.
 
@@ -443,6 +450,14 @@ def _scroll(
     if not isinstance(session_id, str) or not session_id.strip():
         return tool_error("scroll requires session_id", success=False)
     session_id = session_id.strip()
+
+    if recall_scope is not None and not db.session_matches_recall_scope(
+        session_id, recall_scope
+    ):
+        return tool_error(
+            "scroll rejected: session is outside the active recall scope",
+            success=False,
+        )
 
     try:
         around_message_id = int(around_message_id)
@@ -560,6 +575,7 @@ def _title_match_result(
     db,
     query: str,
     current_lineage_root: Optional[str],
+    recall_scope=None,
 ) -> Optional[Dict[str, Any]]:
     """Return a discovery-shaped result when the query matches a session title."""
     title_query = _normalize_title_query(query)
@@ -584,6 +600,10 @@ def _title_match_result(
         logging.debug("get_session failed for title match %s", session_id, exc_info=True)
         session_meta = {}
     if session_meta.get("source") in _HIDDEN_SESSION_SOURCES:
+        return None
+    if recall_scope is not None and not db.session_matches_recall_scope(
+        session_id, recall_scope
+    ):
         return None
 
     try:
@@ -630,11 +650,14 @@ def _discover(
     limit: int,
     sort: Optional[str],
     current_session_id: str = None,
+    recall_scope=None,
 ) -> str:
     """Discovery shape: FTS5 + anchored window + bookends per hit. Single call."""
     role_list = role_filter if role_filter else ["user", "assistant"]
     current_lineage_root = _resolve_lineage(db, current_session_id) if current_session_id else None
-    title_result = _title_match_result(db, query, current_lineage_root)
+    title_result = _title_match_result(
+        db, query, current_lineage_root, recall_scope=recall_scope
+    )
 
     try:
         raw_results = db.search_messages(
@@ -646,6 +669,7 @@ def _discover(
             # of cron rows are still in hand for the demotion pass below.
             offset=0,
             sort=sort,
+            recall_scope=recall_scope,
         )
     except Exception as e:
         logging.error("FTS5 search failed: %s", e, exc_info=True)
@@ -790,6 +814,8 @@ def session_search(
     sort: str = None,
     # Cross-profile (any shape)
     profile: str = None,
+    # Trusted runtime boundary. Never exposed in the model tool schema.
+    enforce_scope: bool = False,
 ) -> str:
     """Single-shape tool. Mode inferred from which args are set.
 
@@ -811,6 +837,49 @@ def session_search(
             from hermes_state import format_session_db_unavailable
             return tool_error(format_session_db_unavailable(), success=False)
 
+    recall_scope = None
+    if enforce_scope:
+        if not current_session_id:
+            return tool_error(
+                "active session id unavailable; refusing unscoped history access",
+                success=False,
+            )
+        try:
+            active_session = db.get_session(current_session_id)
+            if not active_session:
+                return tool_error(
+                    "active session metadata unavailable; refusing unscoped history access",
+                    success=False,
+                )
+            recall_scope = db.recall_scope_for_session(current_session_id)
+            has_gateway_metadata = any(
+                active_session.get(key)
+                for key in (
+                    "user_id",
+                    "user_id_alt",
+                    "session_key",
+                    "chat_id",
+                    "chat_type",
+                    "thread_id",
+                    "origin_json",
+                )
+            )
+            if has_gateway_metadata and recall_scope is None:
+                return tool_error(
+                    "session recall scope unavailable; refusing unscoped history access",
+                    success=False,
+                )
+        except Exception:
+            logging.warning(
+                "Failed to derive session recall scope for %s",
+                current_session_id,
+                exc_info=True,
+            )
+            return tool_error(
+                "session recall scope unavailable; refusing unscoped history access",
+                success=False,
+            )
+
     # Normalise a raw `@session:<profile>/<id>` link value passed as session_id.
     # Session ids never contain "/", so a slash unambiguously means profile/id —
     # always strip the prefix off the id, and adopt the embedded profile only
@@ -822,6 +891,12 @@ def session_search(
             session_id = emb_id
             if emb_profile and (profile is None or not str(profile).strip()):
                 profile = emb_profile
+
+    if enforce_scope and recall_scope is not None and profile:
+        return tool_error(
+            "cross-profile session recall is not available from messaging sessions",
+            success=False,
+        )
 
     # Cross-profile read: swap in the named profile's DB (read-only) for every
     # shape below. The current-session-lineage guards no longer apply across
@@ -843,11 +918,19 @@ def session_search(
             around_message_id=around_message_id,
             window=window,
             current_session_id=current_session_id,
+            recall_scope=recall_scope,
         )
 
     # Read shape: a session_id with no anchor → dump the whole session.
     if isinstance(session_id, str) and session_id.strip():
         sid = session_id.strip()
+        if recall_scope is not None and not db.session_matches_recall_scope(
+            sid, recall_scope
+        ):
+            return tool_error(
+                "session read rejected: session is outside the active recall scope",
+                success=False,
+            )
         result = _read_session(db, sid)
         if json.loads(result).get("success"):
             return result
@@ -855,6 +938,8 @@ def session_search(
         # Miss in the target profile — the model may have dropped the owning
         # profile from the link. Scan every profile and read it from wherever
         # it lives, tagging the profile it was found in.
+        if enforce_scope:
+            return result
         located, owner = _locate_session_db(sid)
         if located is not None:
             try:
@@ -876,7 +961,12 @@ def session_search(
 
     # Browse shape: no query → recent sessions.
     if not query or not isinstance(query, str) or not query.strip():
-        return _list_recent_sessions(db, limit, current_session_id)
+        return _list_recent_sessions(
+            db,
+            limit,
+            current_session_id,
+            recall_scope=recall_scope,
+        )
 
     # Parse role_filter
     role_list: Optional[List[str]] = None
@@ -897,6 +987,7 @@ def session_search(
         limit=limit,
         sort=sort_norm,
         current_session_id=current_session_id,
+        recall_scope=recall_scope,
     )
 
 
@@ -953,11 +1044,10 @@ SESSION_SEARCH_SCHEMA = {
         "       - When messages_before or messages_after is < window, you're at the "
         "start or end of the session.\n\n"
         "  3) READ — pass `session_id` only (no around_message_id):\n"
-        "     session_search(session_id=\"...\", profile=\"work\")\n"
+        "     session_search(session_id=\"...\")\n"
         "     Dumps the whole session by id (first 20 + last 10 messages when "
-        "large). This is how you resolve an `@session:<profile>/<id>` link the "
-        "user dropped into the chat: split the value on `/` into profile + id "
-        "and call session_search(session_id=id, profile=profile).\n\n"
+        "large). Messaging sessions are ownership-scoped by the runtime; the "
+        "model cannot select another profile or principal.\n\n"
         "  4) BROWSE — no args:\n"
         "     session_search()\n"
         "     Returns recent sessions chronologically: titles, previews, timestamps. "
@@ -1042,15 +1132,6 @@ SESSION_SEARCH_SCHEMA = {
                     "behaviour) or 'tool' to search tool output only."
                 ),
             },
-            "profile": {
-                "type": "string",
-                "description": (
-                    "Optional. Read sessions from another Hermes profile's database "
-                    "(read-only). Use when resolving an `@session:<profile>/<id>` link: "
-                    "pass the profile segment here with session_id as the id segment. "
-                    "Omit to use the current profile."
-                ),
-            },
         },
         "required": [],
     },
@@ -1072,9 +1153,10 @@ registry.register(
         around_message_id=args.get("around_message_id"),
         window=args.get("window", 5),
         sort=args.get("sort"),
-        profile=args.get("profile"),
+        profile=kw.get("profile"),
         db=kw.get("db"),
         current_session_id=kw.get("current_session_id"),
+        enforce_scope=kw.get("enforce_scope", False),
     ),
     check_fn=check_session_search_requirements,
     emoji="🔍",
