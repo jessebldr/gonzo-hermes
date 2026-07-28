@@ -81,6 +81,9 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
 - [Chứng minh markdown-vault-mcp sau vault-policy](tickets/0025-chung-minh-markdown-vault-mcp-sau-vault-policy.md) —
   pass trên 665-note corpus: giữ `v3.1.0` làm private index engine sau normalized mirror +
   clean-commit gate; warm p95 35.6 ms, peak RSS ~780 MiB, không cần fork upstream.
+- [Absorb vault-policy và nối pilot Hermes](tickets/0026-absorb-vault-policy-va-noi-pilot-hermes.md) —
+  production stdio seam expose đúng một policy tool; locked E2E + Docker negative probe
+  pass, và Feishu DM live canary gọi vault warm `0.07–0.24s` rồi trả cited response.
 
 ## Fog
 

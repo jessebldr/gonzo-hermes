@@ -2,7 +2,7 @@
 id: "0026"
 title: Absorb vault-policy và nối pilot Hermes
 type: task
-status: open
+status: closed
 assignee: "codex"
 blocked_by: ["0025"]
 ---
@@ -54,5 +54,31 @@ thật qua Lark như thế nào?
 - Gateway đã chuyển từ detached process sang launchd, Feishu WS connected và startup
   register `mcp__gonzo_vault__vault_query`.
 
-Acceptance còn thiếu đúng một bằng chứng: owner gửi canary từ Lark và nhìn thấy response có
-citation. Giữ ticket `open` cho tới khi canary đó đi trọn inbound → tool → outbound.
+## Resolution
+
+**Pass — production read seam đã absorb và Lark pilot dùng vault thật end-to-end.**
+
+Live owner canary ngày 2026-07-28 đi trọn Feishu DM → existing DM session → stdio policy
+tool → Feishu outbound:
+
+- `06:56:35` inbound `Ai có quyền approve 1 vault not` vào session
+  `20260727_154211_410d00e9`;
+- agent gọi `mcp__gonzo_vault__vault_query` hai lần (`0.24s` + `0.07s`);
+- `06:56:43` response ready sau `8.0s`, 3 API calls, 853 ký tự; owner xác nhận đã nhận và
+  tiếp tục hỏi nhiều câu thật;
+- `billiards`, `Kyperus`, một đoạn claim dài và cấu trúc creative ads đều gọi vault tool,
+  warm latency mỗi call khoảng `0.07–0.10s`, rồi outbound thành công;
+- reply vào một message riêng tạo session định vị riêng
+  `20260728_070114_d5a8130e`, đúng contract Feishu card/message addressing của ADR 0002.
+
+Dashboard đang chạy ở Tailscale `100.79.40.55:9119`; trang Sessions hiển thị transcript,
+tool-call count, tên + arguments từng `vault_query` và tool-result messages; trang Logs cho
+lọc `agent`, `gateway`, `errors`. Đây là operator surface đủ để trace pilot hiện tại.
+
+Raw vault vẫn không mount vào Docker, model chỉ thấy reread excerpts + `use_class`. stdio
+spawn/pipe là capability boundary thay cho một network credential giả tạo. Locked runtime,
+behavioral/transport/truth tests và production E2E đều pass; gateway chạy dưới launchd.
+
+Tripwire giữ nguyên: chưa thêm user Lark thứ hai trước khi scope hoặc disable
+`session_search`, vì implementation hiện không lọc `user_id` và còn hỗ trợ cross-profile
+lookup.
