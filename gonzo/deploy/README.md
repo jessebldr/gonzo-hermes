@@ -35,6 +35,10 @@ Thư mục script + config, không phải package Python — cố ý không có 
 - `apply-config.sh` — áp nó vào `$HERMES_HOME/config.yaml`. Mặc định chỉ in diff; `--write`
   mới ghi; đồng thời cài launcher `~/.hermes/bin/gonzo-vault-policy-mcp`. Kèm kiểm
   `key_env` có giá trị trong `.env` chưa.
+- Khi private `~/.hermes/gonzo-runtime.yaml` tồn tại, `apply-config.sh` validate rồi append
+  `multiplex_profiles: true` + `profile_routes` từ file đó. Không có map thì multiplex fail
+  closed ở `false`. Principal/chat ID không đi vào git; example và bootstrap nằm ở
+  `gonzo/profiles/`.
 
 **Hiện trạng pilot:** `hermes-config.yaml` đã dùng Docker no-mount cho file, terminal và
 `execute_code`, đồng thời đăng ký stdio MCP `gonzo_vault` với whitelist đúng một tool

@@ -1,0 +1,47 @@
+# Copy to ~/.hermes/gonzo-runtime.yaml, chmod 600, then replace fake IDs.
+# The real file is runtime-only and must never be committed.
+
+# The default profile owns the one Lark/Feishu listener. These key NAMES are
+# copied from the operator .env into ~/.hermes/.env; values are never printed.
+default_secret_keys:
+  - FEISHU_APP_ID
+  - FEISHU_APP_SECRET
+  - FEISHU_DOMAIN
+  - FEISHU_HOME_CHANNEL
+
+profiles:
+  # Keep the current owner on the built-in default profile during the pilot so
+  # existing session history remains searchable. Every additional human starts fresh.
+  - name: personal-b
+    seed: fresh
+  - name: shared-task
+    seed: fresh
+
+profile_routes:
+  # Direct-message principal route. On Feishu, prefer the stable union_id.
+  # The current owner remains on the built-in default profile so old sessions
+  # stay searchable. The bootstrap derives FEISHU_ALLOWED_USERS from every
+  # Feishu principal route and forces FEISHU_ALLOW_ALL_USERS=false.
+  - name: owner-dm
+    platform: feishu
+    principal_id: on_replace_owner
+    profile: default
+
+  - name: personal-b-dm
+    platform: feishu
+    principal_id: on_replace_personal_b
+    profile: personal-b
+
+  # Exact owner+bot workspace override. It beats the generic group fallback.
+  - name: owner-workspace
+    platform: feishu
+    chat_type: group
+    chat_id: oc_replace_owner_workspace
+    profile: default
+
+  # Multi-human groups belong to shared task state, not to the speaker.
+  # This catch-all prevents an unlisted group from falling into default memory.
+  - name: all-groups
+    platform: feishu
+    chat_type: group
+    profile: shared-task

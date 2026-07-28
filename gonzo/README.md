@@ -65,10 +65,19 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `tests/tools/test_code_execution_container_config.py` | Pin exact execute-first container contract bằng non-default values | pending — lifecycle fix |
 | `tests/tools/test_docker_network_config.py` | Thay AST change-detector bằng behavioral contract trên shared builder | pending — lifecycle fix |
 | `agent/redact.py` | Strict URL boundary nhận diện `access_key` và authentication `ticket`; default URL behavior không đổi | `test_redact.py` + `test_feishu_logging.py` |
-| `plugins/platforms/feishu/adapter.py` | Card action: dùng `context.open_message_id` thay cho card token (`c-…`), resolve `thread_id` của topic, và không phát `/card` (lệnh không ai đăng ký). Bắt buộc vì Lark Topic-mode không có định vị theo message — [ADR 0002](../docs/architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md). Logger boundary ép che credential WS do SDK tự in | `test_feishu_card_action_addressing.py` + `test_feishu_logging.py` |
-| `tests/gateway/test_feishu_approval_buttons.py` | Một test pin hành vi `/card` cũ; sửa để pin **ý định** (click tới được agent, `value` sống sót) thay vì tiền tố slash | chính nó |
+| `plugins/platforms/feishu/adapter.py` | Card action: dùng `context.open_message_id` thay cho card token (`c-…`), resolve `thread_id` của topic, và không phát `/card` (lệnh không ai đăng ký). Bắt buộc vì Lark Topic-mode không có định vị theo message — [ADR 0002](../docs/architecture/decisions/0002-dinh-vi-trong-lark-va-va-adapter.md). Logger boundary ép che credential WS do SDK tự in. Allowlist/group/card callback giữ đủ `open_id`/`user_id`/`union_id` để stable principal hoạt động end-to-end | `test_feishu_card_action_addressing.py` + `test_feishu_logging.py` + `486256633` |
+| `tests/gateway/test_feishu_approval_buttons.py` | Pin click card tới được agent, `value` sống sót và authorization bằng `union_id` qua cả synchronous callback lẫn async re-check | chính nó + `486256633` |
+| `tests/gateway/test_feishu_bot_admission.py` | Pin stable `union_id` đi xuyên group admission tới shared-profile routing | `486256633` |
 | `tests/gateway/test_feishu_logging.py` | Pin invariant log WS thật: credential bị che, endpoint và public diagnostic params còn nguyên, không phụ thuộc redaction preference | chính nó |
-| `website/docs/user-guide/messaging/feishu.md` | Ghi granular scope nhận DM/group @mention và cách xử lý case group chạy nhưng DM im lặng | pending — pilot closure |
+| `website/docs/user-guide/messaging/feishu.md` | Ghi granular scope nhận DM/group @mention, cách xử lý case group chạy nhưng DM im lặng và allowlist nhận stable `union_id` ngoài `open_id`/`user_id` | pending — pilot closure + `486256633` |
+| `docs/profile-routing.md` | Document DM principal route, normalized chat type, specificity và shared-group fallback | `486256633` |
+| `gateway/config.py` | Mở schema/doc config profile route cho `principal_id` và `chat_type` | `486256633` |
+| `gateway/platforms/base.py` | Khai báo runner back-reference cho mọi adapter để inbound profile routing không còn Discord-only | `486256633` |
+| `gateway/profile_routing.py` | Route DM theo stable principal, normalize chat type và giữ principal route khỏi group/topic | `486256633` |
+| `gateway/run.py` | Truyền principal/chat type vào matcher và resolve đúng profile home dưới multiplex gate | `486256633` |
+| `tests/gateway/test_profile_resolution.py` | E2E adapter → route → profile home → profile-scoped session namespace trên temporary `HERMES_HOME` | `486256633` |
+| `tests/gateway/test_profile_routing.py` | Pin specificity, DM-only principal matching, chat-type fallback và config parsing | `486256633` |
+| `website/docs/user-guide/multi-profile-gateways.md` | Document one-gateway principal/workspace/shared-group topology | `486256633` |
 | `docs/wayfinder/tickets/0021-log-ro-credential-cua-ws.md` | Ghi root cause, boundary và runtime proof của credential-log fix | ticket này |
 | `docs/wayfinder/tickets/0024-docker-no-mount-pilot-va-bat-hermes-test.md` | Theo dõi deploy Docker boundary vào pilot và phép thử Lark thật trước khi nối vault-policy | ticket này |
 | `docs/wayfinder/tickets/0009-retrieval-thiet-ke-tren-corpus-nao.md` | Chốt Gate 3 trên corpus production gần hoàn chỉnh và phân biệt corpus thật với fixture edge-case | ticket này |

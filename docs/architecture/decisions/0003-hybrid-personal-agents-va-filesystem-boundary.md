@@ -128,9 +128,13 @@ Người vẫn là approval cuối ở những biên đã định. Không thêm 
 
 ## Điều kiện an toàn còn mở
 
-Trước khi thêm người thứ hai vào `FEISHU_ALLOWED_USERS`, phải disable hoặc scope
-`session_search` theo người/profile. Hôm nay nó đọc xuyên topic và có đường đọc profile
-khác; personal memory file tách không làm tool này tự an toàn.
+Tripwire `session_search` đã được giải ngày 2026-07-28: DM recall chỉ cùng
+platform/profile/principal; group/topic chỉ exact `chat_id + thread_id`; messaging runtime
+không còn model-controlled cross-profile search. Canary một principal + hai topic đã pass.
+
+Trước khi thêm người thứ hai vào `FEISHU_ALLOWED_USERS`, phần còn lại là deploy hai named
+profiles, route DM bằng stable principal ID và chạy negative canary **hai principal thật**.
+Không được suy canary này từ unit test hoặc từ một người tự đổi topic.
 
 ## Hệ quả
 

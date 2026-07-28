@@ -27,6 +27,10 @@ VAULT_ROOT="${GONZO_VAULT_ROOT:-$(cd "$REPO_ROOT/.." && pwd)/gonzo-vault}"
 DEST="$HERMES_ROOT/config.yaml"
 LAUNCHER_SRC="$REPO_ROOT/gonzo/vault_policy/run-mcp.sh"
 LAUNCHER_DEST="$HERMES_ROOT/bin/gonzo-vault-policy-mcp"
+RUNTIME_MAP="${GONZO_RUNTIME_MAP:-$HERMES_ROOT/gonzo-runtime.yaml}"
+PYTHON="$REPO_ROOT/.venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON="$REPO_ROOT/venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON="$(command -v python3)"
 
 [ -f "$SRC" ] || { echo "không thấy nguồn: $SRC" >&2; exit 1; }
 [ -f "$LAUNCHER_SRC" ] || { echo "không thấy launcher: $LAUNCHER_SRC" >&2; exit 1; }
@@ -44,6 +48,17 @@ sed \
   -e "s|__GONZO_VAULT_ROOT__|$(escape_sed "$VAULT_ROOT")|g" \
   "$SRC" > "$RENDERED"
 
+{
+  echo
+  echo "# Runtime-only profile routing. Principal/chat IDs come from the private map, never git."
+  if [ -f "$RUNTIME_MAP" ]; then
+    "$PYTHON" "$REPO_ROOT/gonzo/profiles/runtime_map.py" render-routes "$RUNTIME_MAP"
+  else
+    echo "multiplex_profiles: false"
+    echo "profile_routes: []"
+  fi
+} >> "$RENDERED"
+
 if [ "${1:-}" != "--write" ]; then
   echo "nguồn : $SRC"
   echo "đích  : $DEST"
@@ -59,6 +74,11 @@ if [ "${1:-}" != "--write" ]; then
     echo "$DEST chưa tồn tại — sẽ tạo mới."
   fi
   echo "launcher: $LAUNCHER_DEST"
+  if [ -f "$RUNTIME_MAP" ]; then
+    echo "routes  : $RUNTIME_MAP"
+  else
+    echo "routes  : chưa có ($RUNTIME_MAP) — multiplex tắt"
+  fi
   echo
   echo "chạy lại với --write để ghi."
   exit 0

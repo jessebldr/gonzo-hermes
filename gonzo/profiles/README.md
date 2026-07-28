@@ -43,16 +43,63 @@ coordination bus, không cần xuất hiện thành nhiều bot trong group.
 4. Fresh reviewer chạy ở boundary đã định, không phải mọi lượt creative.
 5. Host-vault và cross-profile absolute-path probes fail trong sandbox.
 6. Credential/audit log đúng profile thực hiện action.
-7. Trước người thứ hai trong `FEISHU_ALLOWED_USERS`, `session_search` đã disable hoặc scope
-   theo người/profile.
+7. Trước người thứ hai trong `FEISHU_ALLOWED_USERS`, chạy canary hai principal thật trên
+   bản `session_search` đã scope theo người/profile/topic.
 
 ## Đã có pilot
 
 - Default profile `~/.hermes` dùng tracked config Docker no-mount; file/terminal/
   `execute_code` negative probes trên raw vault pass ngày 2026-07-27.
+- `session_search` đã scope theo principal/profile/topic; canary một principal qua `/new`
+  và hai topic thật đã pass ngày 2026-07-28.
+- Core router nhận `principal_id` cho **DM only**. Nó match `user_id_alt`/`user_id` nhưng
+  fail group/topic theo cấu trúc, nên một người nói trong shared group không kéo turn vào
+  personal profile.
+- `runtime_map.py` + `bootstrap.sh` dựng profile từ private runtime map, apply cùng tracked
+  Docker/vault config cho từng profile và chỉ cấp provider key cho named profile. Lark app
+  credentials ở default listener, không bị clone sang personal profile. Chỉ default config
+  bật multiplex/routes; named config luôn giữ `multiplex_profiles: false` để không thể mở
+  nhầm multiplexer thứ hai.
+
+## Bootstrap runtime map
+
+Vault giữ roster/role; runtime map giữ platform ID → profile. Hai thứ cố ý không nhập làm
+một. Copy example ra ngoài git:
+
+```bash
+cp gonzo/profiles/runtime-map.example.yaml ~/.hermes/gonzo-runtime.yaml
+chmod 600 ~/.hermes/gonzo-runtime.yaml
+$EDITOR ~/.hermes/gonzo-runtime.yaml
+```
+
+Dry-run trước, rồi mới ghi:
+
+```bash
+./gonzo/profiles/bootstrap.sh
+./gonzo/profiles/bootstrap.sh --write
+```
+
+Trong pilot hiện tại, giữ owner trên built-in `default` để lịch sử session cũ vẫn recall
+được. `clone-default` chỉ copy config, curated `USER.md`/`MEMORY.md` và skills; nó **không**
+copy `state.db`/session history. Chỉ dùng mode đó khi chấp nhận một session cutover riêng.
+Người thứ hai trở đi luôn `seed: fresh`; nếu clone default cho họ thì memory và
+self-created skills của owner sẽ bị copy sang.
+
+Named profiles nhận các `key_env` cần cho model từ operator `.env`; extra credential chỉ
+được cấp khi liệt kê trong `profiles[].secret_keys`. Default listener nhận các key name ở
+`default_secret_keys`. Mọi `FEISHU_*` key bị cấm ở named profile. Khi map có Feishu
+principal routes, bootstrap tự sinh `FEISHU_ALLOWED_USERS` đúng bằng tập principal đó và
+ép `FEISHU_ALLOW_ALL_USERS=false`; admission và DM routing vì thế dùng cùng một nguồn.
+Map đồng thời phải có đúng một catch-all `chat_type: group` tới `shared-task`, còn
+owner+bot workspace phải có exact `chat_id` override về `default`. Script không in secret
+value và giữ `.env` mode 600.
+
+Route `enabled: false` vẫn được render để staging nhưng không được tính vào allowlist và
+không thỏa các invariant bắt buộc ở trên. `enabled` phải là YAML boolean thật, không phải
+chuỗi `"false"`.
 
 ## Chưa build
 
-- Bộ config production riêng cho từng personal/shared/specialist profile.
-- Router Lark DM · personal workspace · shared topic.
+- Chưa deploy named profiles thật trên pilot và chưa chạy canary hai principal thật.
+- Chưa có Lark principal ID của người thứ hai trong private runtime map.
 - Coordination bus và credential grants cho specialist.
