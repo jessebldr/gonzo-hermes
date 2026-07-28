@@ -18,6 +18,21 @@ _PID_RE = re.compile(r'\"PID\"\s*=\s*(\d+)\s*;')
 _PROGRAM_RE = re.compile(r'\"Program\"\s*=\s*\"([^\"]+)\"\s*;')
 
 
+def _load_launchd_plist(*, launchctl: str, plist_path: Path, attempts: int = 3) -> None:
+    """Load a LaunchAgent, tolerating the short bootout/load race on macOS."""
+    last_error: subprocess.CalledProcessError | None = None
+    for attempt in range(attempts):
+        try:
+            subprocess.run([launchctl, "load", "-w", str(plist_path)], check=True)
+            return
+        except subprocess.CalledProcessError as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.75)
+    assert last_error is not None
+    raise last_error
+
+
 def validate_release_root(release_root: Path) -> bool:
     """Check the minimum filesystem contract for a deployable release."""
     root = Path(release_root).expanduser()
@@ -99,11 +114,14 @@ def install_launchd_plist(
     temporary.write_bytes(payload)
     temporary.replace(plist_path)
     try:
-        subprocess.run([launchctl, "load", str(plist_path)], check=True)
+        _load_launchd_plist(launchctl=launchctl, plist_path=plist_path)
     except Exception:
         if backup.exists():
             shutil.copy2(backup, plist_path)
-            subprocess.run([launchctl, "load", str(plist_path)], check=False)
+            try:
+                _load_launchd_plist(launchctl=launchctl, plist_path=plist_path)
+            except Exception:
+                pass
         raise
     return backup if backup.exists() else None
 
@@ -124,7 +142,7 @@ def rollback_launchd_plist(
         return True
     subprocess.run([launchctl, "bootout", f"{launchd_domain}/ai.hermes.gateway"], check=False)
     shutil.copy2(backup, plist_path)
-    subprocess.run([launchctl, "load", str(plist_path)], check=True)
+    _load_launchd_plist(launchctl=launchctl, plist_path=plist_path)
     return True
 
 
