@@ -78,7 +78,7 @@ def install_launchd_plist(
     plist_path: Path,
     payload: bytes,
     launchctl: str = "launchctl",
-    launchd_domain: str = "user/501",
+    launchd_domain: str = "gui/501",
     dry_run: bool = False,
 ) -> Path | None:
     """Install and load a plist, retaining a recoverable backup.
@@ -112,7 +112,7 @@ def rollback_launchd_plist(
     *,
     plist_path: Path,
     launchctl: str = "launchctl",
-    launchd_domain: str = "user/501",
+    launchd_domain: str = "gui/501",
     dry_run: bool = False,
 ) -> bool:
     """Restore the last plist backup and load it."""
@@ -161,11 +161,16 @@ def main() -> int:
     parser.add_argument("--release-root", type=Path)
     parser.add_argument("--hermes-home", type=Path, default=Path.home() / ".hermes")
     parser.add_argument("--plist", type=Path, default=Path.home() / "Library/LaunchAgents/ai.hermes.gateway.plist")
+    parser.add_argument("--launchd-domain", default="gui/501")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     if args.action == "rollback":
-        return 0 if rollback_launchd_plist(plist_path=args.plist, dry_run=args.dry_run) else 1
+        return 0 if rollback_launchd_plist(
+            plist_path=args.plist,
+            launchd_domain=args.launchd_domain,
+            dry_run=args.dry_run,
+        ) else 1
     if args.release_root is None:
         parser.error("--release-root is required for render/install")
     if not validate_release_root(args.release_root):
@@ -174,7 +179,12 @@ def main() -> int:
     if args.action == "render":
         print(payload.decode())
         return 0
-    install_launchd_plist(plist_path=args.plist, payload=payload, dry_run=args.dry_run)
+    install_launchd_plist(
+        plist_path=args.plist,
+        payload=payload,
+        launchd_domain=args.launchd_domain,
+        dry_run=args.dry_run,
+    )
     return 0
 
 
