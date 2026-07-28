@@ -1,13 +1,16 @@
 """Profile-based routing for the gateway with hierarchical matching.
 
 Allows a single Hermes instance to route specific Discord guilds/channels/threads
-to different profiles — each with their own model, tools, memory, and persona.
+or a direct-message principal to different profiles — each with their own model,
+tools, memory, and persona.
 
 Matching priority (most specific first):
   1. platform + chat_id + thread_id (exact thread)  — specificity 14
   2. platform + chat_id (channel route)             — specificity 6
   3. platform + guild_id (guild/server route)       — specificity 2
-  4. No match                                       → default profile
+  4. platform + principal_id (direct message only) — specificity 2
+  5. platform + chat_type                           — specificity 1
+  6. No match                                       → default profile
 
 Parent-chain matching:
 For Discord threads and forum posts, ``parent_chat_id`` carries the
@@ -30,6 +33,16 @@ Configuration (config.yaml):
           chat_id: "YOUR_CHANNEL_ID"
           profile: channel-profile
 
+        - name: user-a-dm
+          platform: feishu
+          principal_id: "FEISHU_UNION_ID"
+          profile: user-a
+
+        - name: all-feishu-groups
+          platform: feishu
+          chat_type: group
+          profile: shared-task
+
         - name: thread-route
           platform: discord
           chat_id: "YOUR_CHANNEL_ID"
@@ -47,9 +60,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _canonical_chat_type(value: Optional[str]) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"dm", "private", "p2p"}:
+        return "dm"
+    return normalized
+
+
 @dataclass(frozen=True)
 class ProfileRoute:
-    """A single routing rule that maps a platform scope to a profile."""
+    """A single routing rule that maps a platform scope to a profile.
+
+    ``principal_id`` is deliberately direct-message-only. This prevents a
+    personal profile route from stealing a shared group/topic merely because a
+    member of that group sent the message.
+    """
 
     name: str
     platform: str
@@ -57,6 +82,8 @@ class ProfileRoute:
     guild_id: Optional[str] = None
     chat_id: Optional[str] = None
     thread_id: Optional[str] = None
+    chat_type: Optional[str] = None
+    principal_id: Optional[str] = None
     enabled: bool = True
 
     @property
@@ -69,6 +96,10 @@ class ProfileRoute:
             s += 4
         if self.thread_id:
             s += 8
+        if self.chat_type:
+            s += 1
+        if self.principal_id:
+            s += 2
         return s
 
     def matches(
@@ -78,6 +109,9 @@ class ProfileRoute:
         chat_id: Optional[str] = None,
         thread_id: Optional[str] = None,
         parent_chat_id: Optional[str] = None,
+        chat_type: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_id_alt: Optional[str] = None,
     ) -> bool:
         """Return True if this route matches the given source fields.
 
@@ -88,6 +122,10 @@ class ProfileRoute:
         - Thread in channel: parent_chat_id == route.chat_id
         A route declaring both ``guild_id`` and ``chat_id`` requires both to
         match (a chat match alone does not satisfy a guild constraint).
+        ``principal_id`` matches either the source's primary ``user_id`` or
+        stable ``user_id_alt``, but only for a direct-message chat type.
+        ``chat_type`` is normalized so ``dm``, ``private``, and ``p2p`` are
+        equivalent.
         """
         if not self.enabled:
             return False
@@ -99,6 +137,13 @@ class ProfileRoute:
             return False
         if self.guild_id and self.guild_id != guild_id:
             return False
+        if self.chat_type and _canonical_chat_type(self.chat_type) != _canonical_chat_type(chat_type):
+            return False
+        if self.principal_id:
+            if _canonical_chat_type(chat_type) != "dm":
+                return False
+            if self.principal_id not in {user_id, user_id_alt}:
+                return False
         return True
 
 
@@ -116,12 +161,21 @@ def parse_profile_routes(raw: Optional[List[Dict[str, Any]]]) -> List[ProfileRou
         name = entry.get("name", "")
         platform = entry.get("platform", "")
         profile = entry.get("profile", "")
+        principal_id = entry.get("principal_id")
         if not platform or not profile:
             logger.warning(
                 "Skipping profile route %s: missing platform or profile",
                 name,
             )
             continue
+        if "principal_id" in entry:
+            principal_id = str(principal_id or "").strip()
+            if not principal_id:
+                logger.warning(
+                    "Skipping profile route %s: principal_id is blank",
+                    name,
+                )
+                continue
         # Validate profile name to prevent path traversal. Lazy import avoids a
         # circular dependency at module load time.
         try:
@@ -142,6 +196,8 @@ def parse_profile_routes(raw: Optional[List[Dict[str, Any]]]) -> List[ProfileRou
                 guild_id=entry.get("guild_id"),
                 chat_id=entry.get("chat_id"),
                 thread_id=entry.get("thread_id"),
+                chat_type=entry.get("chat_type"),
+                principal_id=principal_id,
                 enabled=entry.get("enabled", True),
             )
         )
@@ -158,9 +214,21 @@ def match_profile_route(
     chat_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     parent_chat_id: Optional[str] = None,
+    chat_type: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_id_alt: Optional[str] = None,
 ) -> Optional[ProfileRoute]:
     """Return the best-matching route, or None for no match."""
     for route in routes:
-        if route.matches(platform, guild_id=guild_id, chat_id=chat_id, thread_id=thread_id, parent_chat_id=parent_chat_id):
+        if route.matches(
+            platform,
+            guild_id=guild_id,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            parent_chat_id=parent_chat_id,
+            chat_type=chat_type,
+            user_id=user_id,
+            user_id_alt=user_id_alt,
+        ):
             return route
     return None

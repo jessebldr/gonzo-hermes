@@ -227,14 +227,40 @@ gateway:
       platform: telegram
       chat_id: "-1001234567890"
       profile: tg-profile
+
+    # One person's DMs → their personal profile. On Feishu, prefer union_id.
+    - name: user-a-dm
+      platform: feishu
+      principal_id: "on_abc123"
+      profile: user-a
+
+    # Otherwise-unrouted groups → shared task state
+    - name: all-feishu-groups
+      platform: feishu
+      chat_type: group
+      profile: shared-task
 ```
 
-Routes are matched most-specific-first (`thread_id` > `chat_id` > `guild_id`),
+Routes are matched most-specific-first
+(`thread_id` > `chat_id` > `guild_id`/`principal_id` > `chat_type`),
 all declared fields must hold (AND), and a route keyed on a channel also
 matches threads/forum posts whose parent is that channel. Messages that match
 no route stay on the default/active profile. The routed profile gets the full
 per-profile isolation described above (config, skills, memory, credentials,
 session namespace). Routing works on every platform adapter, not just Discord.
+
+`principal_id` is a direct-message-only discriminator. It matches either the
+source's stable alternate identity (`user_id_alt`, such as Feishu `union_id`)
+or primary `user_id`. It never matches a group/channel/topic message, so a
+personal route cannot steal a shared conversation merely because that person
+sent the message. Exact `chat_id` routes remain more specific and can override
+the normal personal route.
+
+`chat_type` can provide a safe fallback. For example, route exact owner+bot
+workspace chat IDs to the owner's profile, then add a generic
+`chat_type: group` route to shared task state. This keeps an unlisted group from
+silently falling into the default personal profile. Direct-message spellings
+`dm`, `private`, and `p2p` are normalized as the same type.
 
 `profile_routes` requires `gateway.multiplex_profiles: true`; with
 multiplexing off the routes are ignored. If a route names a profile that does

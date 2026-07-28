@@ -308,6 +308,29 @@ class TestNonDiscordProfileRouting:
 
         assert mock_runner._profile_name_for_source(telegram_source) is None
 
+    def test_feishu_dm_routes_by_stable_principal(self, mock_runner):
+        mock_runner.config.multiplex_profiles = True
+        mock_runner.config.profile_routes = [
+            ProfileRoute(
+                name="user-a-dm",
+                platform="feishu",
+                profile="user-a",
+                principal_id="union-user-a",
+            ),
+        ]
+        source = SessionSource(
+            platform=Platform.FEISHU,
+            chat_id="oc_dm_user-a",
+            chat_type="dm",
+            user_id="open-user-a",
+            user_id_alt="union-user-a",
+        )
+
+        assert mock_runner._profile_name_for_source(source) == "user-a"
+
+        source.chat_type = "group"
+        assert mock_runner._profile_name_for_source(source) is None
+
 
 class TestGatewayRunnerInjection:
     """``BasePlatformAdapter`` declares ``gateway_runner`` so the gateway's
@@ -445,6 +468,87 @@ class TestAdapterToSessionKeyIntegration:
         assert source.profile is None
         key = build_session_key(source, profile=source.profile)
         assert key.startswith("agent:main:"), key
+
+    def test_feishu_personal_and_group_routes_resolve_home_and_session_namespace(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Exercise the pilot topology through the real routing boundary.
+
+        A stable DM principal gets a personal profile, the owner's exact
+        workspace stays on the legacy default profile, and every other group
+        lands in shared task state even when the personal-profile user speaks.
+        """
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        personal_home = tmp_path / "profiles" / "user-a"
+        shared_home = tmp_path / "profiles" / "shared-task"
+        personal_home.mkdir(parents=True)
+        shared_home.mkdir(parents=True)
+
+        runner = object.__new__(GatewayRunner)
+        runner.config = GatewayConfig(
+            multiplex_profiles=True,
+            profile_routes=[
+                ProfileRoute(
+                    name="user-a-dm",
+                    platform="feishu",
+                    profile="user-a",
+                    principal_id="union-user-a",
+                ),
+                ProfileRoute(
+                    name="owner-workspace",
+                    platform="feishu",
+                    profile="default",
+                    chat_type="group",
+                    chat_id="oc_owner_workspace",
+                ),
+                ProfileRoute(
+                    name="all-groups",
+                    platform="feishu",
+                    profile="shared-task",
+                    chat_type="group",
+                ),
+            ],
+        )
+        adapter = _stub_adapter(Platform.FEISHU, runner)
+
+        personal_dm = adapter.build_source(
+            chat_id="oc_user_a_dm",
+            chat_type="p2p",
+            user_id="open-user-a",
+            user_id_alt="union-user-a",
+        )
+        assert personal_dm.profile == "user-a"
+        assert runner._resolve_profile_home_for_source(personal_dm) == personal_home
+        assert build_session_key(personal_dm, profile=personal_dm.profile).startswith(
+            "agent:user-a:"
+        )
+
+        owner_workspace = adapter.build_source(
+            chat_id="oc_owner_workspace",
+            chat_type="group",
+            user_id="open-owner",
+            user_id_alt="union-owner",
+        )
+        assert owner_workspace.profile == "default"
+        assert runner._resolve_profile_home_for_source(owner_workspace) == tmp_path
+        assert build_session_key(
+            owner_workspace,
+            profile=owner_workspace.profile,
+        ).startswith("agent:main:")
+
+        shared_group = adapter.build_source(
+            chat_id="oc_team_group",
+            chat_type="group",
+            user_id="open-user-a",
+            user_id_alt="union-user-a",
+        )
+        assert shared_group.profile == "shared-task"
+        assert runner._resolve_profile_home_for_source(shared_group) == shared_home
+        assert build_session_key(shared_group, profile=shared_group.profile).startswith(
+            "agent:shared-task:"
+        )
 
 
 class TestMultiplexGate:

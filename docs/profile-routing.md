@@ -9,7 +9,9 @@
 By default a single gateway run uses one profile (memory, persona, tools). **Profile-based
 routing** lets one gateway instance serve **multiple isolated profiles**, selecting which
 profile handles an inbound message based on *where the message came from* — the platform,
-server (`guild_id`), channel (`chat_id`), and/or thread (`thread_id`).
+server (`guild_id`), channel (`chat_id`), thread (`thread_id`), or direct-message
+principal (`principal_id`). Routes may also constrain `chat_type`, which is useful for a
+shared-group fallback that prevents unlisted groups from landing in the default profile.
 
 This is the inbound counterpart to multiplexing: instead of running N gateways, run one
 gateway and route per-community / per-channel / per-thread to a dedicated profile. Each
@@ -45,6 +47,19 @@ profile_routes:
     chat_id: "-1001234567890"
     profile: tg-profile
 
+  # Route one person's DMs to their personal profile. For Feishu, prefer the
+  # stable union_id carried by SessionSource.user_id_alt.
+  - name: user-a-dm
+    platform: feishu
+    principal_id: "on_abc123"
+    profile: user-a
+
+  # Catch every otherwise-unrouted Feishu group in shared task state.
+  - name: all-feishu-groups
+    platform: feishu
+    chat_type: group
+    profile: shared-task
+
   # Route a single Discord thread.
   - name: standup-thread
     platform: discord
@@ -64,6 +79,8 @@ profile_routes:
 | `guild_id` | no | Server/guild (Discord). |
 | `chat_id` | no | Channel/group/DM id. |
 | `thread_id` | no | Thread id within a channel. |
+| `chat_type` | no | Conversation type (`dm`, `group`, `channel`, …). `dm`, `private`, and `p2p` compare as the same direct-message type. |
+| `principal_id` | no | Direct-message sender identity. Matches `user_id_alt` or `user_id`; never matches group/channel/topic messages. |
 | `enabled` | no | Default `true`; set `false` to disable a route without removing it. |
 
 ## Matching rules
@@ -76,6 +93,10 @@ A route matches an inbound source when **every discriminator the route declares 
 - **`chat_id`** (if set) must match the source channel **or** its parent — a thread in a
   channel matches the channel's route (hierarchical match for Discord forums/threads).
 - **`guild_id`** (if set) must equal the source guild.
+- **`chat_type`** (if set) must equal the normalized source chat type.
+- **`principal_id`** (if set) must equal the source `user_id_alt` or `user_id`, and the
+  source must be a direct message (`dm`, `private`, or `p2p`). The same person speaking in
+  a group does not match this route.
 
 > A route declaring **both** `guild_id` and `chat_id` requires both to hold. A channel match
 > alone does not satisfy a guild constraint — this is intentional and tested.
@@ -87,9 +108,13 @@ When multiple routes match, the **most specific** one wins. Specificity is addit
 | `thread_id` | 8 |
 | `chat_id` | 4 |
 | `guild_id` | 2 |
+| `principal_id` (DM only) | 2 |
+| `chat_type` | 1 |
 | (platform only) | 0 |
 
-So a thread route (8) beats a channel route (4) beats a guild route (2) within the same server.
+So a thread route (8) beats a channel route (4) beats a guild route (2), which beats a
+chat-type fallback (1). A principal route (2) beats a generic `chat_type: dm` fallback,
+while an exact DM `chat_id` (4) can still override a person's normal profile when needed.
 If no route matches, the message uses the default/active profile.
 
 ## How it works at runtime

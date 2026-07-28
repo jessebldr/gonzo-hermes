@@ -58,6 +58,8 @@ def _make_card_action_data(
     action_value: dict,
     chat_id: str = "oc_12345",
     open_id: str = "ou_user1",
+    user_id: str = "",
+    union_id: str = "",
     token: str = "tok_abc",
 ) -> SimpleNamespace:
     """Create a mock Feishu card action callback data object."""
@@ -65,7 +67,11 @@ def _make_card_action_data(
         event=SimpleNamespace(
             token=token,
             context=SimpleNamespace(open_chat_id=chat_id),
-            operator=SimpleNamespace(open_id=open_id),
+            operator=SimpleNamespace(
+                open_id=open_id,
+                user_id=user_id,
+                union_id=union_id,
+            ),
             action=SimpleNamespace(
                 tag="button",
                 value=action_value,
@@ -393,6 +399,28 @@ class TestResolveApproval:
         assert 5 in adapter._approval_state
 
     @pytest.mark.asyncio
+    async def test_union_only_operator_resolves_when_allowlisted(self):
+        adapter = _make_adapter()
+        adapter._allowed_group_users = {"union-user-a"}
+        adapter._approval_state[7] = {
+            "session_key": "sess-7",
+            "message_id": "msg-007",
+            "chat_id": "oc_12345",
+        }
+
+        with patch("tools.approval.resolve_gateway_approval", return_value=1) as mock_resolve:
+            await adapter._resolve_approval(
+                7,
+                "once",
+                "User A",
+                union_id="union-user-a",
+                chat_id="oc_12345",
+            )
+
+        mock_resolve.assert_called_once_with("sess-7", "once")
+        assert 7 not in adapter._approval_state
+
+    @pytest.mark.asyncio
     async def test_chat_mismatch_does_not_resolve(self):
         adapter = _make_adapter()
         adapter._approval_state[6] = {
@@ -537,6 +565,30 @@ class TestCardActionCallbackResponse:
         card = response.card.data
         assert card["header"]["template"] == "red"
         assert "Denied" in card["header"]["title"]["content"]
+
+    def test_union_only_allowlist_authorizes_approval_callback(
+        self,
+        _patch_callback_card_types,
+    ):
+        adapter = _make_adapter()
+        adapter._loop = MagicMock()
+        adapter._loop.is_closed = MagicMock(return_value=False)
+        adapter._allowed_group_users = {"union-user-a"}
+        adapter._approval_state[20] = {
+            "session_key": "sess-20",
+            "message_id": "msg-20",
+            "chat_id": "oc_12345",
+        }
+        data = _make_card_action_data(
+            {"hermes_action": "approve_once", "approval_id": 20},
+            open_id="",
+            union_id="union-user-a",
+        )
+
+        with patch("asyncio.run_coroutine_threadsafe", side_effect=_close_submitted_coro):
+            response = adapter._on_card_action_trigger(data)
+
+        assert response.card is not None
 
     def test_ignores_missing_approval_id(self, _patch_callback_card_types):
         adapter = _make_adapter()
@@ -700,6 +752,30 @@ class TestCardActionCallbackResponse:
         card = response.card.data
         assert card["header"]["template"] == "red"
         assert "answered: No" in card["header"]["title"]["content"]
+
+    def test_union_only_allowlist_authorizes_update_prompt_callback(
+        self,
+        _patch_callback_card_types,
+    ):
+        adapter = _make_adapter()
+        adapter._loop = MagicMock()
+        adapter._loop.is_closed = MagicMock(return_value=False)
+        adapter._allowed_group_users = {"union-user-a"}
+        adapter._update_prompt_state[21] = {
+            "session_key": "sess-up-21",
+            "message_id": "msg-up-21",
+            "chat_id": "oc_12345",
+        }
+        data = _make_card_action_data(
+            {"hermes_update_prompt_action": "y", "update_prompt_id": 21},
+            open_id="",
+            union_id="union-user-a",
+        )
+
+        with patch("asyncio.run_coroutine_threadsafe", side_effect=_close_submitted_coro):
+            response = adapter._on_card_action_trigger(data)
+
+        assert response.card is not None
 
     def test_ignores_missing_update_prompt_id(self, _patch_callback_card_types):
         adapter = _make_adapter()
@@ -886,3 +962,30 @@ class TestResolveUpdatePrompt:
 
         assert not (tmp_path / ".hermes" / ".update_response").exists()
         assert 10 in adapter._update_prompt_state
+
+    @pytest.mark.asyncio
+    async def test_union_only_operator_writes_response_when_allowlisted(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        adapter = _make_adapter()
+        adapter._allowed_group_users = {"union-user-a"}
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+        (tmp_path / ".hermes").mkdir()
+        adapter._update_prompt_state[11] = {
+            "session_key": "sess-up-11",
+            "message_id": "msg-up-011",
+            "chat_id": "oc_12345",
+        }
+
+        await adapter._resolve_update_prompt(
+            11,
+            "y",
+            "User A",
+            union_id="union-user-a",
+            chat_id="oc_12345",
+        )
+
+        assert (tmp_path / ".hermes" / ".update_response").read_text() == "y"
+        assert 11 not in adapter._update_prompt_state

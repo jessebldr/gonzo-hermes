@@ -28,6 +28,24 @@ class TestProfileRoute:
         r = ProfileRoute(name="m", platform="telegram", profile="p")
         assert r.specificity == 0
 
+    def test_specificity_principal(self):
+        r = ProfileRoute(
+            name="personal",
+            platform="feishu",
+            profile="user-a",
+            principal_id="union-user-a",
+        )
+        assert r.specificity == 2
+
+    def test_specificity_chat_type(self):
+        r = ProfileRoute(
+            name="shared-groups",
+            platform="feishu",
+            profile="shared-task",
+            chat_type="group",
+        )
+        assert r.specificity == 1
+
     def test_frozen(self):
         r = ProfileRoute(name="x", platform="discord", profile="p")
         with pytest.raises(AttributeError):
@@ -35,6 +53,38 @@ class TestProfileRoute:
 
 
 class TestProfileRouteMatching:
+    def test_chat_type_route_matches_groups_without_matching_dm(self):
+        r = ProfileRoute(
+            name="shared-groups",
+            platform="feishu",
+            profile="shared-task",
+            chat_type="group",
+        )
+
+        assert r.matches("feishu", chat_type="group")
+        assert not r.matches("feishu", chat_type="dm")
+
+    def test_principal_route_matches_only_direct_messages(self):
+        r = ProfileRoute(
+            name="personal",
+            platform="feishu",
+            profile="user-a",
+            principal_id="union-user-a",
+        )
+
+        assert r.matches(
+            "feishu",
+            chat_type="dm",
+            user_id="open-user-a",
+            user_id_alt="union-user-a",
+        )
+        assert not r.matches(
+            "feishu",
+            chat_type="group",
+            user_id="open-user-a",
+            user_id_alt="union-user-a",
+        )
+
     def test_exact_thread_match(self):
         r = ProfileRoute(name="t", platform="discord", profile="trader",
                          guild_id="111", chat_id="222", thread_id="333")
@@ -123,6 +173,37 @@ class TestParseProfileRoutes:
         assert not routes[0].enabled
         assert routes[1].enabled
 
+    def test_principal_id_is_parsed_for_personal_dm_route(self):
+        routes = parse_profile_routes([
+            {
+                "name": "user-a-dm",
+                "platform": "feishu",
+                "profile": "user-a",
+                "principal_id": "union-user-a",
+            },
+        ])
+
+        assert routes == [
+            ProfileRoute(
+                name="user-a-dm",
+                platform="feishu",
+                profile="user-a",
+                principal_id="union-user-a",
+            ),
+        ]
+
+    def test_blank_principal_id_route_is_rejected_instead_of_becoming_global(self):
+        routes = parse_profile_routes([
+            {
+                "name": "unconfigured-personal-dm",
+                "platform": "feishu",
+                "profile": "personal",
+                "principal_id": "",
+            },
+        ])
+
+        assert routes == []
+
 
 class TestMatchProfileRoute:
     def test_no_routes(self):
@@ -155,6 +236,79 @@ class TestMatchProfileRoute:
             ProfileRoute(name="r", platform="telegram", profile="p"),
         ]
         assert match_profile_route(routes, "discord") is None
+
+    def test_principal_route_uses_stable_or_primary_identity(self):
+        routes = [
+            ProfileRoute(
+                name="user-a-dm",
+                platform="feishu",
+                profile="user-a",
+                principal_id="union-user-a",
+            ),
+        ]
+
+        matched = match_profile_route(
+            routes,
+            "feishu",
+            chat_type="dm",
+            user_id="open-user-a",
+            user_id_alt="union-user-a",
+        )
+
+        assert matched is routes[0]
+
+    def test_exact_dm_chat_route_overrides_principal_route(self):
+        routes = parse_profile_routes([
+            {
+                "name": "user-a-dm",
+                "platform": "feishu",
+                "profile": "user-a",
+                "principal_id": "union-user-a",
+            },
+            {
+                "name": "dm-incident-room",
+                "platform": "feishu",
+                "profile": "shared-incident",
+                "chat_id": "oc_incident",
+            },
+        ])
+
+        matched = match_profile_route(
+            routes,
+            "feishu",
+            chat_id="oc_incident",
+            chat_type="dm",
+            user_id_alt="union-user-a",
+        )
+
+        assert matched is not None
+        assert matched.profile == "shared-incident"
+
+    def test_principal_route_overrides_generic_dm_fallback(self):
+        routes = parse_profile_routes([
+            {
+                "name": "all-dm-fallback",
+                "platform": "feishu",
+                "profile": "quarantine",
+                "chat_type": "dm",
+            },
+            {
+                "name": "user-a-dm",
+                "platform": "feishu",
+                "profile": "user-a",
+                "principal_id": "union-user-a",
+            },
+        ])
+
+        matched = match_profile_route(
+            routes,
+            "feishu",
+            chat_type="p2p",
+            user_id_alt="union-user-a",
+        )
+
+        assert matched is not None
+        assert matched.profile == "user-a"
 
 
 class TestSessionKeyIntegration:

@@ -693,6 +693,45 @@ def test_allow_group_message_matrix(case):
     ) is case["expected"]
 
 
+def test_stable_union_allowlist_reaches_shared_profile_routing():
+    """The identity admitted by Feishu must be the identity routing receives."""
+    from gateway.config import GatewayConfig, Platform
+    from gateway.profile_routing import ProfileRoute
+    from gateway.run import GatewayRunner
+
+    adapter = make_adapter_skeleton(require_mention=False)
+    adapter._allowed_group_users = frozenset({"union-user-a"})
+    runner = object.__new__(GatewayRunner)
+    runner.config = GatewayConfig(
+        multiplex_profiles=True,
+        profile_routes=[
+            ProfileRoute(
+                name="all-groups",
+                platform="feishu",
+                profile="shared-task",
+                chat_type="group",
+            ),
+        ],
+    )
+    adapter.platform = Platform.FEISHU
+    adapter.gateway_runner = runner
+    sender = make_sender(
+        open_id="open-user-a",
+        user_id=None,
+        union_id="union-user-a",
+    )
+    message = make_message(chat_type="group", chat_id="oc_team")
+
+    assert adapter._admit(sender, message) is None
+    source = adapter.build_source(
+        chat_id=message.chat_id,
+        chat_type=message.chat_type,
+        user_id=sender.sender_id.open_id,
+        user_id_alt=sender.sender_id.union_id,
+    )
+    assert source.profile == "shared-task"
+
+
 @pytest.mark.parametrize("policy, sender_type, expected", _GROUP_RULE_CASES)
 def test_allow_group_message_channel_locks_apply_to_bots(policy, sender_type, expected):
     adapter = make_adapter_skeleton()

@@ -493,19 +493,23 @@ def _is_bot_sender(sender: Any) -> bool:
     return getattr(sender, "sender_type", "") in {"bot", "app"}
 
 
-def _sender_identity(sender: Any) -> frozenset:
-    # Take any non-empty id variant — tenant sender_id_type decides which are populated.
-    sid = getattr(sender, "sender_id", None)
-    if sid is None:
+def _identity_values(identifier: Any) -> frozenset[str]:
+    if identifier is None:
         return frozenset()
     return frozenset(
-        v for v in (
-            getattr(sid, "open_id", None),
-            getattr(sid, "user_id", None),
-            getattr(sid, "union_id", None),
+        value
+        for value in (
+            getattr(identifier, "open_id", None),
+            getattr(identifier, "user_id", None),
+            getattr(identifier, "union_id", None),
         )
-        if v
+        if value
     )
+
+
+def _sender_identity(sender: Any) -> frozenset:
+    # Take any non-empty id variant — tenant sender_id_type decides which are populated.
+    return _identity_values(getattr(sender, "sender_id", None))
 
 
 # ---------------------------------------------------------------------------
@@ -2752,15 +2756,24 @@ class FeishuAdapter(BasePlatformAdapter):
         future.add_done_callback(self._log_background_failure)
         return True
 
-    def _is_interactive_operator_authorized(self, open_id: str) -> bool:
+    def _is_interactive_operator_authorized(
+        self,
+        open_id: str = "",
+        user_id: str = "",
+        union_id: str = "",
+    ) -> bool:
         """Return whether this card-action operator may answer gated prompts."""
-        normalized = str(open_id or "").strip()
-        if not normalized:
+        operator_ids = {
+            str(value).strip()
+            for value in (open_id, user_id, union_id)
+            if str(value or "").strip()
+        }
+        if not operator_ids:
             return False
         allowed_ids = set(self._admins) | set(self._allowed_group_users)
         if not allowed_ids:
             return True
-        return "*" in allowed_ids or normalized in allowed_ids
+        return "*" in allowed_ids or bool(operator_ids & allowed_ids)
 
     def _handle_approval_card_action(self, *, event: Any, action_value: Dict[str, Any], loop: Any) -> Any:
         """Schedule approval resolution and build the synchronous callback response."""
@@ -2776,9 +2789,16 @@ class FeishuAdapter(BasePlatformAdapter):
 
         operator = getattr(event, "operator", None)
         open_id = str(getattr(operator, "open_id", "") or "")
-        sender_id = SimpleNamespace(open_id=open_id, user_id=str(getattr(operator, "user_id", "") or ""))
+        user_id = str(getattr(operator, "user_id", "") or "")
+        union_id = str(getattr(operator, "union_id", "") or "")
+        operator_id = open_id or user_id or union_id
+        sender_id = SimpleNamespace(
+            open_id=open_id,
+            user_id=user_id,
+            union_id=union_id,
+        )
         if not self._allow_group_message(sender_id, state.get("chat_id", ""), is_bot=False):
-            logger.warning("[Feishu] Unauthorized approval click by %s", open_id or "<unknown>")
+            logger.warning("[Feishu] Unauthorized approval click by %s", operator_id or "<unknown>")
             return P2CardActionTriggerResponse() if P2CardActionTriggerResponse else None
 
         callback_chat_id = str(getattr(getattr(event, "context", None), "open_chat_id", "") or "")
@@ -2792,7 +2812,7 @@ class FeishuAdapter(BasePlatformAdapter):
             )
             return P2CardActionTriggerResponse() if P2CardActionTriggerResponse else None
 
-        user_name = self._get_cached_sender_name(open_id) or open_id
+        user_name = self._get_cached_sender_name(operator_id) or operator_id
 
         chat_context = getattr(event, "context", None)
         chat_id = str(getattr(chat_context, "open_chat_id", "") or "")
@@ -2803,6 +2823,8 @@ class FeishuAdapter(BasePlatformAdapter):
                 choice=choice,
                 user_name=user_name,
                 open_id=open_id,
+                user_id=user_id,
+                union_id=union_id,
                 chat_id=chat_id,
             ),
         ):
@@ -2836,9 +2858,16 @@ class FeishuAdapter(BasePlatformAdapter):
 
         operator = getattr(event, "operator", None)
         open_id = str(getattr(operator, "open_id", "") or "")
-        sender_id = SimpleNamespace(open_id=open_id, user_id=str(getattr(operator, "user_id", "") or ""))
+        user_id = str(getattr(operator, "user_id", "") or "")
+        union_id = str(getattr(operator, "union_id", "") or "")
+        operator_id = open_id or user_id or union_id
+        sender_id = SimpleNamespace(
+            open_id=open_id,
+            user_id=user_id,
+            union_id=union_id,
+        )
         if not self._allow_group_message(sender_id, state.get("chat_id", ""), is_bot=False):
-            logger.warning("[Feishu] Unauthorized update prompt click by %s", open_id or "<unknown>")
+            logger.warning("[Feishu] Unauthorized update prompt click by %s", operator_id or "<unknown>")
             return P2CardActionTriggerResponse() if P2CardActionTriggerResponse else None
 
         callback_chat_id = str(getattr(getattr(event, "context", None), "open_chat_id", "") or "")
@@ -2852,7 +2881,7 @@ class FeishuAdapter(BasePlatformAdapter):
             )
             return P2CardActionTriggerResponse() if P2CardActionTriggerResponse else None
 
-        user_name = self._get_cached_sender_name(open_id) or open_id
+        user_name = self._get_cached_sender_name(operator_id) or operator_id
         if not self._submit_on_loop(
             loop,
             self._resolve_update_prompt(
@@ -2860,6 +2889,8 @@ class FeishuAdapter(BasePlatformAdapter):
                 answer,
                 user_name,
                 open_id=open_id,
+                user_id=user_id,
+                union_id=union_id,
                 chat_id=callback_chat_id,
             ),
         ):
@@ -2882,6 +2913,8 @@ class FeishuAdapter(BasePlatformAdapter):
         user_name: str,
         *,
         open_id: str = "",
+        user_id: str = "",
+        union_id: str = "",
         chat_id: str = "",
     ) -> None:
         """Pop approval state and unblock the waiting agent thread."""
@@ -2889,8 +2922,9 @@ class FeishuAdapter(BasePlatformAdapter):
         if not state:
             logger.debug("[Feishu] Approval %s already resolved or unknown", approval_id)
             return
-        if not self._is_interactive_operator_authorized(open_id):
-            logger.warning("[Feishu] Unauthorized approval click by %s for approval %s", open_id or "<unknown>", approval_id)
+        if not self._is_interactive_operator_authorized(open_id, user_id, union_id):
+            operator_id = open_id or user_id or union_id
+            logger.warning("[Feishu] Unauthorized approval click by %s for approval %s", operator_id or "<unknown>", approval_id)
             return
         expected_chat_id = str(state.get("chat_id", "") or "")
         if expected_chat_id and chat_id and expected_chat_id != chat_id:
@@ -2936,6 +2970,8 @@ class FeishuAdapter(BasePlatformAdapter):
         user_name: str,
         *,
         open_id: str = "",
+        user_id: str = "",
+        union_id: str = "",
         chat_id: str = "",
     ) -> None:
         """Persist an update prompt answer for the detached update process."""
@@ -2943,10 +2979,15 @@ class FeishuAdapter(BasePlatformAdapter):
         if not state:
             logger.debug("[Feishu] Update prompt %s already resolved or unknown", prompt_id)
             return
-        if open_id:
-            sender_id = SimpleNamespace(open_id=open_id, user_id="")
+        operator_id = open_id or user_id or union_id
+        if operator_id:
+            sender_id = SimpleNamespace(
+                open_id=open_id,
+                user_id=user_id,
+                union_id=union_id,
+            )
             if not self._allow_group_message(sender_id, state.get("chat_id", ""), is_bot=False):
-                logger.warning("[Feishu] Unauthorized update prompt click by %s for prompt %s", open_id, prompt_id)
+                logger.warning("[Feishu] Unauthorized update prompt click by %s for prompt %s", operator_id, prompt_id)
                 return
         expected_chat_id = str(state.get("chat_id", "") or "")
         if expected_chat_id and chat_id and expected_chat_id != chat_id:
@@ -4428,9 +4469,7 @@ class FeishuAdapter(BasePlatformAdapter):
         is_bot: bool = False,
     ) -> bool:
         """Per-group policy gate for non-DM traffic."""
-        sender_open_id = getattr(sender_id, "open_id", None)
-        sender_user_id = getattr(sender_id, "user_id", None)
-        sender_ids = {sender_open_id, sender_user_id} - {None}
+        sender_ids = set(_identity_values(sender_id))
 
         if sender_ids and self._admins and (sender_ids & self._admins):
             return True

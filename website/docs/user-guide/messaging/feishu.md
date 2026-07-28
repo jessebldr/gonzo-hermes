@@ -152,7 +152,7 @@ FEISHU_DOMAIN=feishu
 FEISHU_CONNECTION_MODE=websocket
 
 # Optional but strongly recommended
-FEISHU_ALLOWED_USERS=ou_xxx,ou_yyy
+FEISHU_ALLOWED_USERS=on_xxx,on_yyy
 FEISHU_HOME_CHANNEL=oc_xxx
 ```
 
@@ -183,13 +183,15 @@ FEISHU_HOME_CHANNEL=oc_xxx
 
 ### User Allowlist
 
-For production use, set an allowlist of Feishu Open IDs:
+For production use, set an allowlist of Feishu user identities. Prefer stable
+`union_id` values (`on_...`) when the event payload provides them; `open_id`
+and tenant `user_id` values are also accepted:
 
 ```bash
-FEISHU_ALLOWED_USERS=ou_xxx,ou_yyy
+FEISHU_ALLOWED_USERS=on_xxx,on_yyy
 ```
 
-If you leave the allowlist empty, anyone who can reach the bot may be able to use it. In group chats, the allowlist is checked against the sender's open_id before the message is processed.
+If you leave the allowlist empty, anyone who can reach the bot may be able to use it. In group chats, the allowlist is checked against every sender identity present in the event (`union_id`, `open_id`, or `user_id`) before the message is processed.
 
 ### Webhook Encryption Key
 
@@ -546,7 +548,7 @@ Inbound messages are deduplicated using message IDs with a 24-hour TTL. The dedu
 | `FEISHU_APP_SECRET` | ✅ | — | Feishu/Lark App Secret |
 | `FEISHU_DOMAIN` | — | `feishu` | `feishu` (China) or `lark` (international) |
 | `FEISHU_CONNECTION_MODE` | — | `websocket` | `websocket` or `webhook` |
-| `FEISHU_ALLOWED_USERS` | — | _(empty)_ | Comma-separated open_id list for user allowlist |
+| `FEISHU_ALLOWED_USERS` | — | _(empty)_ | Comma-separated Feishu identity allowlist; stable `union_id` is preferred, with `open_id` and `user_id` also accepted |
 | `FEISHU_ALLOW_BOTS` | — | `none` | Accept messages from other bots: `none`, `mentions`, or `all` |
 | `FEISHU_REQUIRE_MENTION` | — | `true` | Whether group messages must @mention the bot |
 | `FEISHU_HOME_CHANNEL` | — | — | Chat ID for cron/notification output |
