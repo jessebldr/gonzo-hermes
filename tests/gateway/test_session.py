@@ -1044,6 +1044,7 @@ class TestSlackWorkspaceSessionIsolation:
             chat_id="D_SHARED",
             chat_type="dm",
             user_id="U_SHARED",
+            user_id_alt="U_STABLE",
         )
         scoped_key = build_session_key(source)
         legacy_key = build_session_key(replace(source, scope_id=None, guild_id=None))
@@ -1071,6 +1072,10 @@ class TestSlackWorkspaceSessionIsolation:
         assert (
             store._db.record_gateway_session_peer.call_args.kwargs["session_key"]
             == scoped_key
+        )
+        assert (
+            store._db.record_gateway_session_peer.call_args.kwargs["user_id_alt"]
+            == "U_STABLE"
         )
 
 

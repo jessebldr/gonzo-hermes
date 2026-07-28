@@ -2575,6 +2575,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                     sort=next_args.get("sort"),
                     db=session_db,
                     current_session_id=agent.session_id,
+                    enforce_scope=True,
                 ),
                 next_args,
             )

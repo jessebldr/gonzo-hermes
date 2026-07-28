@@ -71,6 +71,41 @@ class TestFlushDeduplication:
             finally:
                 db.close()
 
+    def test_gateway_lazy_session_creation_persists_recall_identity(self):
+        from hermes_state import SessionDB
+        from run_agent import AIAgent
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = SessionDB(db_path=Path(tmpdir) / "gateway.db")
+            try:
+                with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+                    agent = AIAgent(
+                        api_key="test-key",
+                        base_url="https://openrouter.ai/api/v1",
+                        model="test/model",
+                        quiet_mode=True,
+                        session_db=db,
+                        session_id="feishu-recall-session",
+                        platform="feishu",
+                        user_id="u-khanh",
+                        user_id_alt="on-khanh",
+                        chat_id="dm-khanh",
+                        chat_type="dm",
+                        thread_id="topic-private",
+                        skip_context_files=True,
+                        skip_memory=True,
+                    )
+                agent._ensure_db_session()
+
+                row = db.get_session("feishu-recall-session")
+                assert row["user_id"] == "u-khanh"
+                assert row["user_id_alt"] == "on-khanh"
+                assert row["chat_id"] == "dm-khanh"
+                assert row["chat_type"] == "dm"
+                assert row["thread_id"] == "topic-private"
+            finally:
+                db.close()
+
     def test_flush_writes_incrementally(self):
         """Messages added between flushes are written exactly once."""
         from hermes_state import SessionDB
