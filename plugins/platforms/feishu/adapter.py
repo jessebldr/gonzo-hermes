@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import concurrent.futures
+from contextlib import nullcontext
 import hashlib
 import hmac
 import itertools
@@ -3399,7 +3400,43 @@ class FeishuAdapter(BasePlatformAdapter):
         message_id: str,
         is_bot: bool = False,
     ) -> None:
-        text, inbound_type, media_urls, media_types, mentions = await self._extract_message_content(message)
+        # Resolve the routed profile before downloading attachment bytes.
+        # Cache helpers derive their destination from HERMES_HOME; in a
+        # multiplexed gateway, downloading first would put every user's file
+        # in the default profile cache.  The later agent turn then runs under
+        # the named profile and cannot map/mount that foreign host path.  Build
+        # the source up front and scope extraction to its profile so uploads
+        # are born inside the same isolation boundary that will process them.
+        chat_id = getattr(message, "chat_id", "") or ""
+        thread_id = getattr(message, "thread_id", None) or getattr(message, "root_id", None) or None
+        chat_info = await self.get_chat_info(chat_id)
+        sender_profile = await self._resolve_sender_profile(sender_id, is_bot=is_bot)
+        source = self.build_source(
+            chat_id=chat_id,
+            chat_name=chat_info.get("name") or chat_id or "Feishu Chat",
+            chat_type=self._resolve_source_chat_type(chat_info=chat_info, event_chat_type=chat_type),
+            user_id=sender_profile["user_id"],
+            user_name=sender_profile["user_name"],
+            thread_id=thread_id,
+            user_id_alt=sender_profile["user_id_alt"],
+            is_bot=is_bot,
+            message_id=message_id,
+        )
+
+        profile_scope = nullcontext()
+        runner = getattr(self, "gateway_runner", None)
+        if runner is not None and source.profile:
+            # Do not fall back to the process/default home if profile
+            # resolution fails: that would recreate the cross-profile cache
+            # leak this boundary is meant to prevent. Let the inbound event
+            # fail and be retried by the gateway instead.
+            from gateway.run import _profile_runtime_scope
+
+            profile_home = runner._resolve_profile_home_for_source(source)
+            profile_scope = _profile_runtime_scope(profile_home)
+
+        with profile_scope:
+            text, inbound_type, media_urls, media_types, mentions = await self._extract_message_content(message)
 
         if inbound_type == MessageType.TEXT:
             text = _strip_edge_self_mentions(text, mentions)
@@ -3416,7 +3453,6 @@ class FeishuAdapter(BasePlatformAdapter):
             if hint:
                 text = f"{hint}\n\n{text}" if text else hint
 
-        thread_id = getattr(message, "thread_id", None) or getattr(message, "root_id", None) or None
         reply_to_message_id = (
             getattr(message, "parent_id", None)
             or getattr(message, "upper_message_id", None)
@@ -3443,19 +3479,6 @@ class FeishuAdapter(BasePlatformAdapter):
             len(media_urls),
         )
 
-        chat_id = getattr(message, "chat_id", "") or ""
-        chat_info = await self.get_chat_info(chat_id)
-        sender_profile = await self._resolve_sender_profile(sender_id, is_bot=is_bot)
-        source = self.build_source(
-            chat_id=chat_id,
-            chat_name=chat_info.get("name") or chat_id or "Feishu Chat",
-            chat_type=self._resolve_source_chat_type(chat_info=chat_info, event_chat_type=chat_type),
-            user_id=sender_profile["user_id"],
-            user_name=sender_profile["user_name"],
-            thread_id=thread_id,
-            user_id_alt=sender_profile["user_id_alt"],
-            is_bot=is_bot,
-        )
         normalized = MessageEvent(
             text=text,
             message_type=inbound_type,
@@ -3498,6 +3521,7 @@ class FeishuAdapter(BasePlatformAdapter):
             event.source,
             group_sessions_per_user=self.config.extra.get("group_sessions_per_user", True),
             thread_sessions_per_user=self.config.extra.get("thread_sessions_per_user", False),
+            profile=event.source.profile,
         )
         return f"{session_key}:media:{event.message_type.value}"
 

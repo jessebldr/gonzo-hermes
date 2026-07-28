@@ -3232,6 +3232,7 @@ class DispatchMiddleware(InboundMiddleware):
             ctx.source,
             group_sessions_per_user=adapter.config.extra.get("group_sessions_per_user", True),
             thread_sessions_per_user=adapter.config.extra.get("thread_sessions_per_user", False),
+            profile=ctx.source.profile,
         )
 
         async def _dispatch_inbound_event() -> None:

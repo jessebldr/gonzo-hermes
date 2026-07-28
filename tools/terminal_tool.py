@@ -1177,12 +1177,14 @@ def _resolve_container_task_id(task_id: Optional[str]) -> str:
     Map a tool-call ``task_id`` to the container/sandbox key used by
     ``_active_environments``.
 
-    The top-level agent passes ``task_id=None`` and lands on ``"default"``.
-    ``delegate_task`` children pass their own subagent ID so that
-    file-state tracking, the active-subagents registry, and TUI events stay
-    distinct per child -- but we deliberately collapse that ID back to
-    ``"default"`` here so subagents share the parent's long-lived container
-    (one bash, one /workspace, one set of installed packages).
+    In a single-profile process, the top-level agent passes ``task_id=None``
+    and lands on ``"default"``.  ``delegate_task`` children pass their own
+    subagent ID so file-state tracking, the active-subagents registry, and TUI
+    events stay distinct per child -- but we deliberately collapse that ID
+    back to the parent's shared sandbox.  In a multiplexed gateway, a named
+    profile instead lands on ``"default:<profile>"`` so users never reuse one
+    another's container, while that profile's subagents still share its bash,
+    workspace, installed packages, cache mounts, and skills.
 
     Exception: RL / benchmark environments (TerminalBench2, HermesSweEnv, ...)
     call ``register_task_env_overrides(task_id, {...})`` to request a
@@ -1204,6 +1206,25 @@ def _resolve_container_task_id(task_id: Optional[str]) -> str:
         overrides = _task_env_overrides[task_id]
         if set(overrides.keys()) & _ISOLATION_KEYS:
             return task_id
+
+    # A multiplexed gateway serves multiple profile homes in one process.
+    # Their agents and subagents may share a sandbox *within* the profile, but
+    # must never reuse the first profile's cached container: that would carry
+    # its skills, mounted caches, cwd, and writable workspace into another
+    # person's turn.  The session profile is task-local (ContextVar-backed),
+    # so concurrent gateway turns resolve independently without consulting a
+    # process-global environment variable.  Single-profile/CLI callers keep
+    # the historical ``default`` key byte-for-byte.
+    try:
+        from gateway.session_context import get_session_env
+
+        profile = get_session_env("HERMES_SESSION_PROFILE", "").strip().lower()
+    except Exception:
+        profile = ""
+    if profile and profile != "default":
+        safe_profile = re.sub(r"[^a-z0-9_-]", "-", profile).strip("-")
+        if safe_profile:
+            return f"default:{safe_profile}"
     return "default"
 
 

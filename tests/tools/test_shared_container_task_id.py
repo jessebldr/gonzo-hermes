@@ -1,13 +1,15 @@
 """
 Regression tests for the shared-container task_id mapping.
 
-The top-level agent and all delegate_task subagents share a single
-terminal sandbox keyed by ``"default"``.  ``_resolve_container_task_id``
-is the sole gatekeeper for which tool-call task_ids go to the shared
-container vs. get their own isolated sandbox.  RL / benchmark
-environments opt in to isolation by calling
+In a single-profile process, the top-level agent and all delegate_task
+subagents share the terminal sandbox keyed by ``"default"``.  A multiplexed
+gateway gives each named profile its own ``"default:<profile>"`` sandbox;
+subagents still share their parent profile's sandbox.  ``_resolve_container_task_id``
+is the sole gatekeeper for which tool-call task_ids go to those shared
+containers vs. get their own isolated sandbox.  RL / benchmark
+environments opt in to stronger isolation by calling
 ``register_task_env_overrides(task_id, {...})`` before the agent loop;
-every other task_id collapses back to ``"default"``.
+otherwise a single-profile task collapses back to ``"default"``.
 
 If you change the collapse logic, update both the helper and these
 tests -- see `hermes-agent-dev` skill, "Why do subagents get their own
@@ -40,6 +42,31 @@ def test_empty_task_id_maps_to_default():
 
 def test_literal_default_stays_default():
     assert terminal_tool._resolve_container_task_id("default") == "default"
+
+
+def test_profile_context_gets_a_distinct_container_namespace():
+    """Multiplexed profiles must not reuse the first profile's Docker sandbox."""
+    from gateway.session_context import clear_session_vars, set_session_vars
+
+    tokens = set_session_vars(profile="son")
+    try:
+        assert terminal_tool._resolve_container_task_id("default") == "default:son"
+        assert terminal_tool._resolve_container_task_id(None) == "default:son"
+    finally:
+        clear_session_vars(tokens)
+
+
+def test_profile_subagent_shares_its_parent_profile_namespace():
+    from gateway.session_context import clear_session_vars, set_session_vars
+
+    tokens = set_session_vars(profile="son")
+    try:
+        assert (
+            terminal_tool._resolve_container_task_id("subagent-0-deadbeef")
+            == "default:son"
+        )
+    finally:
+        clear_session_vars(tokens)
 
 
 def test_subagent_task_id_collapses_to_default():

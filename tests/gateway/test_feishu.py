@@ -34,6 +34,149 @@ class _FakeRequestContent:
         return self.body[:size]
 
 
+class TestFeishuProfileBoundaries(unittest.TestCase):
+    def test_media_batch_key_uses_routed_profile_namespace(self):
+        from gateway.config import PlatformConfig
+        from gateway.platforms.base import MessageEvent, MessageType
+        from gateway.session import Platform, SessionSource, build_session_key
+        from plugins.platforms.feishu.adapter import FeishuAdapter
+
+        source = SessionSource(
+            platform=Platform.FEISHU,
+            chat_id="chat-son",
+            chat_type="dm",
+            user_id="son",
+            profile="son",
+        )
+        event = MessageEvent(
+            text="",
+            message_type=MessageType.DOCUMENT,
+            source=source,
+            media_urls=["/tmp/report.xlsx"],
+            media_types=["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+        )
+        adapter = FeishuAdapter(PlatformConfig())
+
+        expected = build_session_key(source, profile="son")
+        self.assertEqual(adapter._text_batch_key(event), expected)
+        self.assertEqual(adapter._media_batch_key(event), expected + ":media:document")
+
+    def test_document_is_cached_under_the_routed_profile_home(self):
+        from gateway.config import PlatformConfig
+        from gateway.platforms.base import cache_document_from_bytes
+        from hermes_constants import get_hermes_home
+        from plugins.platforms.feishu.adapter import FeishuAdapter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            default_home = Path(tmp) / ".hermes"
+            son_home = default_home / "profiles" / "son"
+            default_home.mkdir()
+            son_home.mkdir(parents=True)
+
+            adapter = FeishuAdapter(PlatformConfig())
+            adapter.gateway_runner = SimpleNamespace(
+                _profile_name_for_source=lambda _source: "son",
+                _resolve_profile_home_for_source=lambda _source: son_home,
+            )
+            adapter.get_chat_info = AsyncMock(
+                return_value={"chat_id": "chat-son", "name": "Sơn DM", "type": "dm"}
+            )
+            adapter._resolve_sender_profile = AsyncMock(
+                return_value={
+                    "user_id": "son-user",
+                    "user_name": "Sơn",
+                    "user_id_alt": "son-stable",
+                }
+            )
+            adapter._dispatch_inbound_event = AsyncMock()
+
+            observed_homes = []
+
+            async def _cache_document(**_kwargs):
+                observed_homes.append(get_hermes_home())
+                return (
+                    cache_document_from_bytes(b"xlsx", "report.xlsx"),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+            adapter._download_feishu_message_resource = _cache_document
+            message = SimpleNamespace(
+                chat_id="chat-son",
+                thread_id=None,
+                root_id=None,
+                parent_id=None,
+                upper_message_id=None,
+                message_type="file",
+                content='{"file_key":"file-1","file_name":"report.xlsx"}',
+                message_id="message-1",
+                mentions=None,
+            )
+            sender_id = SimpleNamespace(
+                open_id="open-son", user_id="son-user", union_id="son-stable"
+            )
+
+            with patch.dict(os.environ, {"HERMES_HOME": str(default_home)}):
+                asyncio.run(
+                    adapter._process_inbound_message(
+                        data=SimpleNamespace(),
+                        message=message,
+                        sender_id=sender_id,
+                        chat_type="p2p",
+                        message_id="message-1",
+                    )
+                )
+
+            self.assertEqual(observed_homes, [son_home])
+            event = adapter._dispatch_inbound_event.await_args.args[0]
+            self.assertEqual(event.source.profile, "son")
+            self.assertTrue(event.media_urls[0].startswith(str(son_home / "cache" / "documents")))
+
+    def test_profile_home_resolution_failure_does_not_download_to_default(self):
+        from gateway.config import PlatformConfig
+        from plugins.platforms.feishu.adapter import FeishuAdapter
+
+        adapter = FeishuAdapter(PlatformConfig())
+        adapter.gateway_runner = SimpleNamespace(
+            _profile_name_for_source=Mock(return_value="son"),
+            _resolve_profile_home_for_source=Mock(
+                side_effect=RuntimeError("profile unavailable")
+            )
+        )
+        adapter.get_chat_info = AsyncMock(
+            return_value={"chat_id": "chat-son", "name": "Sơn DM", "type": "dm"}
+        )
+        adapter._resolve_sender_profile = AsyncMock(
+            return_value={
+                "user_id": "son-user",
+                "user_name": "Sơn",
+                "user_id_alt": "son-stable",
+            }
+        )
+        adapter._extract_message_content = AsyncMock()
+
+        message = SimpleNamespace(
+            chat_id="chat-son",
+            thread_id=None,
+            root_id=None,
+            message_type="file",
+        )
+        sender_id = SimpleNamespace(
+            open_id="open-son", user_id="son-user", union_id="son-stable"
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "profile unavailable"):
+            asyncio.run(
+                adapter._process_inbound_message(
+                    data=SimpleNamespace(),
+                    message=message,
+                    sender_id=sender_id,
+                    chat_type="p2p",
+                    message_id="message-1",
+                )
+            )
+        adapter._extract_message_content.assert_not_awaited()
+
+
 def _mock_event_dispatcher_builder(mock_handler_class):
     mock_builder = Mock()
     mock_builder.register_p2_im_message_message_read_v1 = Mock(return_value=mock_builder)

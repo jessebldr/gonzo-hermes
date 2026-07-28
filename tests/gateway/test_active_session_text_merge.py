@@ -47,6 +47,7 @@ def _make_event(
     user_id: str = "u1",
     user_name: str | None = None,
     thread_id: str | None = None,
+    profile: str | None = None,
 ) -> MessageEvent:
     source = SessionSource(
         platform=Platform.TELEGRAM,
@@ -55,6 +56,7 @@ def _make_event(
         user_id=user_id,
         user_name=user_name,
         thread_id=thread_id,
+        profile=profile,
     )
     return MessageEvent(
         text=text,
@@ -130,6 +132,29 @@ async def test_rapid_text_followups_accumulate_instead_of_replacing():
     pending = adapter._pending_messages[session_key]
     assert pending.text == "part two\npart three"
     assert not adapter._active_sessions[session_key].is_set()
+
+
+@pytest.mark.asyncio
+async def test_active_session_guard_uses_the_routed_profile_namespace():
+    """A busy default profile must not capture a named profile's turn."""
+    adapter = _make_adapter()
+    default_event = _make_event("default busy")
+    default_key = build_session_key(default_event.source)
+    son_event = _make_event("son turn", profile="son")
+    son_key = build_session_key(son_event.source, profile="son")
+    adapter._active_sessions[default_key] = asyncio.Event()
+
+    await adapter.handle_message(son_event)
+
+    for _ in range(20):
+        if adapter._message_handler.await_count:
+            break
+        await asyncio.sleep(0)
+
+    adapter._message_handler.assert_awaited_once_with(son_event)
+    assert default_key in adapter._active_sessions
+    assert default_key not in adapter._pending_messages
+    assert son_key != default_key
 
 
 @pytest.mark.asyncio
