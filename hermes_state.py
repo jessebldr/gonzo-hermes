@@ -5205,7 +5205,11 @@ class SessionDB:
             ).fetchone()
         return row is not None
 
-    def resolve_session_id(self, session_id_or_prefix: str) -> Optional[str]:
+    def resolve_session_id(
+        self,
+        session_id_or_prefix: str,
+        profile_name: str = None,
+    ) -> Optional[str]:
         """Resolve an exact or uniquely prefixed session ID to the full ID.
 
         Returns the exact ID when it exists. Otherwise treats the input as a
@@ -5213,6 +5217,10 @@ class SessionDB:
         unambiguous. Returns None for no matches or ambiguous prefixes.
         """
         exact = self.get_session(session_id_or_prefix)
+        if exact and profile_name is not None:
+            exact_profile = str(exact.get("profile_name") or "default")
+            if exact_profile != (profile_name or "default"):
+                exact = None
         if exact:
             return exact["id"]
 
@@ -5222,10 +5230,16 @@ class SessionDB:
             .replace("%", "\\%")
             .replace("_", "\\_")
         )
+        profile_sql = ""
+        params: List[Any] = [f"{escaped}%"]
+        if profile_name is not None:
+            profile_sql = " AND COALESCE(profile_name, 'default') = ?"
+            params.append(profile_name or "default")
         with self._lock:
             cursor = self._conn.execute(
-                "SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\' ORDER BY started_at DESC LIMIT 2",
-                (f"{escaped}%",),
+                "SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\'"
+                f"{profile_sql} ORDER BY started_at DESC LIMIT 2",
+                params,
             )
             matches = [row["id"] for row in cursor.fetchall()]
         if len(matches) == 1:
@@ -5710,6 +5724,7 @@ class SessionDB:
         search_query: str = None,
         compact_rows: bool = False,
         recall_scope: SessionRecallScope = None,
+        profile_name: str = None,
     ) -> List[Dict[str, Any]]:
         """List sessions with preview (first user message) and last active timestamp.
 
@@ -5782,6 +5797,9 @@ class SessionDB:
             scope_sql, scope_params = self._recall_scope_sql(recall_scope)
             where_clauses.append(scope_sql)
             params.extend(scope_params)
+        if profile_name is not None:
+            where_clauses.append("COALESCE(s.profile_name, 'default') = ?")
+            params.append(profile_name or "default")
         if cwd_prefix:
             clause, clause_params = _cwd_prefix_clause(cwd_prefix)
             where_clauses.append(clause)
@@ -7648,6 +7666,7 @@ class SessionDB:
         exclude_sources: List[str] = None,
         role_filter: List[str] = None,
         recall_scope: SessionRecallScope = None,
+        profile_name: str = None,
         limit: int = 20,
         offset: int = 0,
     ) -> Optional[List[Dict[str, Any]]]:
@@ -7693,6 +7712,9 @@ class SessionDB:
             scope_sql, scope_params = self._recall_scope_sql(recall_scope)
             tri_where.append(scope_sql)
             tri_params.extend(scope_params)
+        if profile_name is not None:
+            tri_where.append("COALESCE(s.profile_name, 'default') = ?")
+            tri_params.append(profile_name or "default")
         tri_sql = f"""
             SELECT
                 m.id,
@@ -7732,6 +7754,7 @@ class SessionDB:
         sort: str = None,
         include_inactive: bool = False,
         recall_scope: SessionRecallScope = None,
+        profile_name: str = None,
     ) -> List[Dict[str, Any]]:
         """Instrumented wrapper around :meth:`_search_messages_impl`.
 
@@ -7753,6 +7776,7 @@ class SessionDB:
                 offset=offset,
                 sort=sort,
                 recall_scope=recall_scope,
+                profile_name=profile_name,
                 include_inactive=include_inactive,
             )
             return rows
@@ -7804,6 +7828,7 @@ class SessionDB:
         sort: str = None,
         include_inactive: bool = False,
         recall_scope: SessionRecallScope = None,
+        profile_name: str = None,
     ) -> List[Dict[str, Any]]:
         """
         Full-text search across session messages using FTS5.
@@ -7890,6 +7915,9 @@ class SessionDB:
             scope_sql, scope_params = self._recall_scope_sql(recall_scope)
             where_clauses.append(scope_sql)
             params.extend(scope_params)
+        if profile_name is not None:
+            where_clauses.append("COALESCE(s.profile_name, 'default') = ?")
+            params.append(profile_name or "default")
 
         where_sql = " AND ".join(where_clauses)
         params.extend([limit, offset])
@@ -7987,6 +8015,9 @@ class SessionDB:
                     scope_sql, scope_params = self._recall_scope_sql(recall_scope)
                     cjk_where.append(scope_sql)
                     cjk_params.extend(scope_params)
+                if profile_name is not None:
+                    cjk_where.append("COALESCE(s.profile_name, 'default') = ?")
+                    cjk_params.append(profile_name or "default")
                 cjk_sql = f"""
                     SELECT
                         m.id,
@@ -8080,6 +8111,9 @@ class SessionDB:
                     scope_sql, scope_params = self._recall_scope_sql(recall_scope)
                     tri_where.append(scope_sql)
                     tri_params.extend(scope_params)
+                if profile_name is not None:
+                    tri_where.append("COALESCE(s.profile_name, 'default') = ?")
+                    tri_params.append(profile_name or "default")
                 tri_sql = f"""
                     SELECT
                         m.id,
@@ -8178,6 +8212,9 @@ class SessionDB:
                     scope_sql, scope_params = self._recall_scope_sql(recall_scope)
                     like_where.append(scope_sql)
                     like_params.extend(scope_params)
+                if profile_name is not None:
+                    like_where.append("COALESCE(s.profile_name, 'default') = ?")
+                    like_params.append(profile_name or "default")
                 like_sql = f"""
                     SELECT m.id, m.session_id, m.role,
                            substr(m.content,
@@ -8238,6 +8275,7 @@ class SessionDB:
                     exclude_sources=exclude_sources,
                     role_filter=role_filter,
                     recall_scope=recall_scope,
+                    profile_name=profile_name,
                 )
                 seen_ids = {m["id"] for m in matches}
                 matches.extend(m for m in gap_matches if m["id"] not in seen_ids)
@@ -8277,6 +8315,7 @@ class SessionDB:
                     exclude_sources=exclude_sources,
                     role_filter=role_filter,
                     recall_scope=recall_scope,
+                    profile_name=profile_name,
                     limit=limit,
                     offset=offset,
                 )
@@ -8295,6 +8334,7 @@ class SessionDB:
                     exclude_sources=exclude_sources,
                     role_filter=role_filter,
                     recall_scope=recall_scope,
+                    profile_name=profile_name,
                     limit=limit,
                     offset=offset,
                 )
@@ -8379,6 +8419,7 @@ class SessionDB:
         exclude_sources: Optional[List[str]] = None,
         role_filter: Optional[List[str]] = None,
         recall_scope: SessionRecallScope = None,
+        profile_name: str = None,
     ) -> List[Dict[str, Any]]:
         """LIKE-scan the rows the deferred rebuild hasn't indexed yet.
 
@@ -8428,6 +8469,9 @@ class SessionDB:
             scope_sql, scope_params = self._recall_scope_sql(recall_scope)
             where.append(scope_sql)
             params.extend(scope_params)
+        if profile_name is not None:
+            where.append("COALESCE(s.profile_name, 'default') = ?")
+            params.append(profile_name or "default")
 
         sql = f"""
             SELECT m.id, m.session_id, m.role,
@@ -8452,6 +8496,7 @@ class SessionDB:
         query: str,
         limit: int = 20,
         include_archived: bool = True,
+        profile_name: str = None,
     ) -> List[Dict[str, Any]]:
         """Search surfaced sessions by exact/prefix/substring session id.
 
@@ -8477,6 +8522,7 @@ class SessionDB:
             include_archived=include_archived,
             order_by_last_active=True,
             id_query=needle,
+            profile_name=profile_name,
         )
 
         def score(row: Dict[str, Any]) -> int:
@@ -8543,6 +8589,7 @@ class SessionDB:
         archived_only: bool = False,
         exclude_children: bool = False,
         exclude_sources: List[str] = None,
+        profile_name: str = None,
     ) -> int:
         """Count sessions, optionally filtered by source.
 
@@ -8574,6 +8621,9 @@ class SessionDB:
             placeholders = ",".join("?" for _ in exclude_sources)
             where_clauses.append(f"s.source NOT IN ({placeholders})")
             params.extend(exclude_sources)
+        if profile_name is not None:
+            where_clauses.append("COALESCE(s.profile_name, 'default') = ?")
+            params.append(profile_name or "default")
         if cwd_prefix:
             clause, clause_params = _cwd_prefix_clause(cwd_prefix)
             where_clauses.append(clause)
@@ -8592,12 +8642,23 @@ class SessionDB:
             cursor = self._conn.execute(f"SELECT COUNT(*) FROM sessions s{where_sql}", params)
             return cursor.fetchone()[0]
 
-    def message_count(self, session_id: str = None) -> int:
+    def message_count(
+        self,
+        session_id: str = None,
+        profile_name: str = None,
+    ) -> int:
         """Count messages, optionally for a specific session."""
         with self._lock:
             if session_id:
                 cursor = self._conn.execute(
                     "SELECT COUNT(*) FROM messages WHERE session_id = ?", (session_id,)
+                )
+            elif profile_name is not None:
+                cursor = self._conn.execute(
+                    "SELECT COUNT(*) FROM messages m "
+                    "JOIN sessions s ON s.id = m.session_id "
+                    "WHERE COALESCE(s.profile_name, 'default') = ?",
+                    (profile_name or "default",),
                 )
             else:
                 cursor = self._conn.execute("SELECT COUNT(*) FROM messages")
@@ -9363,7 +9424,7 @@ class SessionDB:
             self._remove_session_files(sessions_dir, sid)
         return count
 
-    def count_empty_sessions(self) -> int:
+    def count_empty_sessions(self, profile_name: str = None) -> int:
         """Return the count of empty, non-active, non-archived sessions.
 
         "Empty" = ``message_count = 0`` AND the session has ended
@@ -9380,17 +9441,25 @@ class SessionDB:
         count.
         """
         with self._lock:
+            profile_sql = ""
+            params: List[Any] = []
+            if profile_name is not None:
+                profile_sql = " AND COALESCE(profile_name, 'default') = ?"
+                params.append(profile_name or "default")
             cursor = self._conn.execute(
                 "SELECT COUNT(*) FROM sessions "
                 "WHERE message_count = 0 "
                 "AND ended_at IS NOT NULL "
                 "AND archived = 0"
+                f"{profile_sql}",
+                params,
             )
             return cursor.fetchone()[0]
 
     def delete_empty_sessions(
         self,
         sessions_dir: Optional[Path] = None,
+        profile_name: str = None,
     ) -> int:
         """Delete every empty, ended, non-archived session.
 
@@ -9420,11 +9489,18 @@ class SessionDB:
         removed_ids: list[str] = []
 
         def _do(conn):
+            profile_sql = ""
+            params: List[Any] = []
+            if profile_name is not None:
+                profile_sql = " AND COALESCE(profile_name, 'default') = ?"
+                params.append(profile_name or "default")
             cursor = conn.execute(
                 "SELECT id FROM sessions "
                 "WHERE message_count = 0 "
                 "AND ended_at IS NOT NULL "
                 "AND archived = 0"
+                f"{profile_sql}",
+                params,
             )
             session_ids = {row["id"] for row in cursor.fetchall()}
 

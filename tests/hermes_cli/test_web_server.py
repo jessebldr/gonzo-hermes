@@ -2119,6 +2119,115 @@ class TestWebServerEndpoints:
         messages = self.client.get("/api/sessions/worker-only/messages?profile=worker").json()
         assert [m["content"] for m in messages["messages"]] == ["worker"]
 
+    def test_gateway_session_in_global_db_belongs_to_its_logical_profile(self):
+        """Multiplex gateway rows stay in the central DB but belong to the
+        profile persisted in ``sessions.profile_name``.
+
+        The dashboard must surface the row through the selected profile's
+        public session APIs, and must not leak it into the default profile.
+        """
+        from hermes_state import SessionDB
+        from hermes_cli import profiles as profiles_mod
+
+        son_home = profiles_mod.get_profile_dir("son")
+        son_home.mkdir(parents=True)
+
+        db = SessionDB()
+        try:
+            db.create_session(
+                session_id="son-gateway-session",
+                source="feishu",
+                profile_name="son",
+                session_key="agent:son:feishu:dm:oc_son",
+                chat_id="oc_son",
+                chat_type="dm",
+                user_id="ou_son",
+            )
+            db.append_message(
+                "son-gateway-session", role="user", content="logical owner is son"
+            )
+        finally:
+            db.close()
+
+        son_list = self.client.get(
+            "/api/sessions?profile=son&limit=20&min_messages=0"
+        )
+        assert son_list.status_code == 200
+        assert {row["id"] for row in son_list.json()["sessions"]} == {
+            "son-gateway-session"
+        }
+
+        default_list = self.client.get("/api/sessions?limit=20&min_messages=0")
+        assert default_list.status_code == 200
+        assert "son-gateway-session" not in {
+            row["id"] for row in default_list.json()["sessions"]
+        }
+
+        aggregate = self.client.get(
+            "/api/profiles/sessions?profile=son&limit=20&min_messages=0"
+        )
+        assert aggregate.status_code == 200
+        assert aggregate.json()["profile_totals"]["son"] == 1
+        assert aggregate.json()["sessions"][0]["profile"] == "son"
+
+        aggregate_all = self.client.get(
+            "/api/profiles/sessions?profile=all&limit=20&min_messages=0"
+        )
+        matching_rows = [
+            row
+            for row in aggregate_all.json()["sessions"]
+            if row["id"] == "son-gateway-session"
+        ]
+        assert [row["profile"] for row in matching_rows] == ["son"]
+        assert aggregate_all.json()["profile_totals"]["son"] == 1
+
+        messages = self.client.get(
+            "/api/sessions/son-gateway-session/messages?profile=son"
+        )
+        assert messages.status_code == 200
+        assert [row["content"] for row in messages.json()["messages"]] == [
+            "logical owner is son"
+        ]
+
+        assert self.client.get(
+            "/api/sessions/son-gateway-session?profile=son"
+        ).status_code == 200
+        assert self.client.get(
+            "/api/sessions/son-gateway-session"
+        ).status_code == 404
+
+        stats = self.client.get("/api/sessions/stats?profile=son")
+        assert stats.status_code == 200
+        assert stats.json()["total"] == 1
+        assert stats.json()["messages"] == 1
+
+        search = self.client.get(
+            "/api/sessions/search?q=logical&profile=son"
+        )
+        assert search.status_code == 200
+        assert [row["session_id"] for row in search.json()["results"]] == [
+            "son-gateway-session"
+        ]
+
+        renamed = self.client.patch(
+            "/api/sessions/son-gateway-session",
+            json={"profile": "son", "title": "Sơn gateway chat"},
+        )
+        assert renamed.status_code == 200
+        exported = self.client.get(
+            "/api/sessions/son-gateway-session/export?profile=son"
+        )
+        assert exported.status_code == 200
+        assert exported.json()["title"] == "Sơn gateway chat"
+
+        deleted = self.client.delete(
+            "/api/sessions/son-gateway-session?profile=son"
+        )
+        assert deleted.status_code == 200
+        assert self.client.get(
+            "/api/sessions/son-gateway-session?profile=son"
+        ).status_code == 404
+
     def test_latest_descendant_reads_requested_profile(self):
         """Chat resume must resolve compression tips in the chat profile DB."""
         from hermes_state import SessionDB
@@ -2153,6 +2262,41 @@ class TestWebServerEndpoints:
         )
         assert worker_resp.status_code == 200
         assert worker_resp.json()["session_id"] == "worker-tip"
+
+    def test_sidebar_partitions_central_gateway_rows_by_logical_profile(self):
+        """The batched sidebar must apply the same logical ownership model
+        as the Sessions page instead of tagging every central row default.
+        """
+        from hermes_state import SessionDB
+        from hermes_cli import profiles as profiles_mod
+
+        profiles_mod.get_profile_dir("son").mkdir(parents=True)
+        db = SessionDB()
+        try:
+            db.create_session(
+                session_id="son-sidebar-gateway",
+                source="feishu",
+                profile_name="son",
+            )
+            db.append_message(
+                "son-sidebar-gateway", role="user", content="sidebar owner"
+            )
+        finally:
+            db.close()
+
+        response = self.client.get(
+            "/api/profiles/sessions/sidebar"
+            "?recents_profile=son&recents_limit=20"
+            "&cron_limit=20&messaging_limit=20"
+            "&messaging_exclude=cron,cli,codex,desktop,gateway,local,tui"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        recents = {row["id"]: row for row in data["recents"]["sessions"]}
+        messaging = {row["id"]: row for row in data["messaging"]["sessions"]}
+        assert recents["son-sidebar-gateway"]["profile"] == "son"
+        assert messaging["son-sidebar-gateway"]["profile"] == "son"
+        assert data["recents"]["profile_totals"]["son"] == 1
 
     def test_latest_descendant_survives_parent_cycle(self):
         """Regression for the #39140 CTE salvage: a corrupted parent chain

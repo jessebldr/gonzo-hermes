@@ -4805,6 +4805,106 @@ def _strip_session_list_rows(sessions: List[Dict[str, Any]]) -> List[Dict[str, A
     return sessions
 
 
+def _logical_session_db_specs(profile: Optional[str]) -> Tuple[str, List[Tuple[Path, Optional[str]]]]:
+    """Return physical stores that can own sessions for one logical profile.
+
+    Named-profile agents normally persist to their own ``state.db``.  The
+    multiplex messaging gateway intentionally persists all routed sessions to
+    the default/central DB and records their owner in ``profile_name``.  A
+    logical profile view therefore consists of its physical DB plus its
+    filtered partition of the central DB.
+    """
+    from hermes_cli import profiles as profiles_mod
+
+    requested = profile or profiles_mod.get_active_profile_name() or "default"
+    name = profiles_mod.normalize_profile_name(requested)
+    physical_path = Path(profiles_mod.get_profile_dir(name)) / "state.db"
+    central_path = Path(profiles_mod.get_profile_dir("default")) / "state.db"
+
+    if name == "default" or physical_path == central_path:
+        return name, [(central_path, "default")]
+    return name, [(physical_path, None), (central_path, name)]
+
+
+def _list_logical_profile_sessions(
+    profile: Optional[str],
+    *,
+    limit: int,
+    offset: int,
+    source: Optional[str],
+    exclude_sources: Optional[List[str]],
+    cwd_prefix: Optional[str],
+    min_message_count: int,
+    include_archived: bool,
+    archived_only: bool,
+    order_by_last_active: bool,
+    compact_rows: bool,
+) -> Tuple[str, List[Dict[str, Any]], int, List[str]]:
+    """Merge local and multiplex-central rows for one logical profile."""
+    from hermes_state import SessionDB
+
+    name, specs = _logical_session_db_specs(profile)
+    overfetch = min(max(limit + offset, limit), 500)
+    merged: Dict[str, Dict[str, Any]] = {}
+    fetched_rows = 0
+    total = 0
+    errors: List[str] = []
+
+    for db_path, profile_filter in specs:
+        create_default_store = len(specs) == 1 and name == "default"
+        if not db_path.exists() and not create_default_store:
+            continue
+        try:
+            db = SessionDB(db_path=db_path, read_only=db_path.exists())
+        except Exception as exc:
+            errors.append(str(exc))
+            continue
+        try:
+            rows = db.list_sessions_rich(
+                source=source,
+                exclude_sources=exclude_sources,
+                cwd_prefix=cwd_prefix,
+                limit=overfetch,
+                offset=0,
+                min_message_count=min_message_count,
+                include_archived=include_archived,
+                archived_only=archived_only,
+                order_by_last_active=order_by_last_active,
+                compact_rows=compact_rows,
+                profile_name=profile_filter,
+            )
+            count = db.session_count(
+                source=source,
+                cwd_prefix=cwd_prefix,
+                exclude_sources=exclude_sources,
+                min_message_count=min_message_count,
+                include_archived=include_archived,
+                archived_only=archived_only,
+                exclude_children=True,
+                profile_name=profile_filter,
+            )
+            total += count
+            fetched_rows += len(rows)
+            # Local profile storage is listed before central storage and wins
+            # if an old migration left the same session id in both places.
+            for row in rows:
+                merged.setdefault(str(row.get("id") or ""), row)
+        except Exception as exc:
+            errors.append(str(exc))
+        finally:
+            db.close()
+
+    rows = list(merged.values())
+    sort_key = "last_active" if order_by_last_active else "started_at"
+    rows.sort(
+        key=lambda row: row.get(sort_key) or row.get("started_at") or 0,
+        reverse=True,
+    )
+    # Counts are per store, so account for duplicate ids suppressed above.
+    total -= max(0, fetched_rows - len(merged))
+    return name, rows[offset:offset + limit], total, errors
+
+
 @app.get("/api/sessions")
 def get_sessions(
     limit: int = 20,
@@ -4843,64 +4943,53 @@ def get_sessions(
             status_code=400,
             detail="order must be one of: created, recent",
         )
-    profile_name: Optional[str] = None
-    if profile:
-        profile_name, _ = _cron_profile_home(profile)
     try:
-        db = _open_session_db_for_profile(profile)
-        try:
-            # Opportunistic, config-gated, double-throttled stale-session
-            # sweep — the only auto_archive hook that fires for Desktop's
-            # `hermes serve` backend. No-op when disabled or run recently.
-            _maybe_auto_archive_for_profile(db, profile)
-            min_message_count = max(0, min_messages)
-            archived_only = archived == "only"
-            include_archived = archived == "include"
-            # Optional source scoping: ``source`` includes a single class,
-            # ``exclude_sources`` (comma-separated) drops classes. The desktop
-            # uses these to split recents (exclude=cron) from the cron-jobs
-            # section (source=cron) into two independent lists.
-            exclude_list = [s for s in (exclude_sources or "").split(",") if s.strip()]
-            sessions = db.list_sessions_rich(
-                source=source or None,
-                exclude_sources=exclude_list or None,
-                cwd_prefix=(cwd_prefix or None),
-                limit=limit,
-                offset=offset,
-                min_message_count=min_message_count,
-                include_archived=include_archived,
-                archived_only=archived_only,
-                order_by_last_active=order == "recent",
-                # SQL-level projection: when the caller didn't ask for full
-                # rows, skip the system_prompt blob inside SQLite too (pairs
-                # with the API-level _strip_session_list_rows below).
-                compact_rows=not full,
+        min_message_count = max(0, min_messages)
+        archived_only = archived == "only"
+        include_archived = archived == "include"
+        exclude_list = [s for s in (exclude_sources or "").split(",") if s.strip()]
+        # Preserve Desktop's opportunistic auto-archive hook on the profile's
+        # physical store.  Do not run it against a named profile's central
+        # gateway partition: the sweep API is not profile-filtered and would
+        # mutate sibling profiles sharing that DB.
+        from hermes_state import SessionDB
+
+        _logical_name, archive_specs = _logical_session_db_specs(profile)
+        if archive_specs:
+            archive_path, archive_filter = archive_specs[0]
+            if archive_path.exists() and archive_filter in (None, "default"):
+                archive_db = SessionDB(db_path=archive_path)
+                try:
+                    _maybe_auto_archive_for_profile(archive_db, profile)
+                finally:
+                    archive_db.close()
+        profile_name, sessions, total, errors = _list_logical_profile_sessions(
+            profile,
+            limit=limit,
+            offset=offset,
+            source=source or None,
+            exclude_sources=exclude_list or None,
+            cwd_prefix=cwd_prefix or None,
+            min_message_count=min_message_count,
+            include_archived=include_archived,
+            archived_only=archived_only,
+            order_by_last_active=order == "recent",
+            compact_rows=not full,
+        )
+        if errors and not sessions:
+            raise RuntimeError("; ".join(errors))
+        now = time.time()
+        for s in sessions:
+            s["is_active"] = (
+                s.get("ended_at") is None
+                and (now - s.get("last_active", s.get("started_at", 0))) < 300
             )
-            total = db.session_count(
-                source=source or None,
-                cwd_prefix=(cwd_prefix or None),
-                exclude_sources=exclude_list or None,
-                min_message_count=min_message_count,
-                include_archived=include_archived,
-                archived_only=archived_only,
-                exclude_children=True,
-            )
-            now = time.time()
-            for s in sessions:
-                s["is_active"] = (
-                    s.get("ended_at") is None
-                    and (now - s.get("last_active", s.get("started_at", 0))) < 300
-                )
-                if profile_name:
-                    s["profile"] = profile_name
-                    s["is_default_profile"] = profile_name == "default"
-                # SQLite stores the flag as 0/1; expose a real JSON boolean.
-                s["archived"] = bool(s.get("archived"))
-            if not full:
-                _strip_session_list_rows(sessions)
-            return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
-        finally:
-            db.close()
+            s["profile"] = profile_name
+            s["is_default_profile"] = profile_name == "default"
+            s["archived"] = bool(s.get("archived"))
+        if not full:
+            _strip_session_list_rows(sessions)
+        return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
     except HTTPException:
         raise
     except Exception:
@@ -4937,7 +5026,6 @@ def get_profiles_sessions(
     if order not in ("created", "recent"):
         raise HTTPException(status_code=400, detail="order must be one of: created, recent")
 
-    from hermes_state import SessionDB
     from hermes_cli import profiles as profiles_mod
 
     targets: List[Tuple[str, Path]] = []
@@ -4971,54 +5059,32 @@ def get_profiles_sessions(
     profile_totals: Dict[str, int] = {}
     errors: List[Dict[str, str]] = []
     now = time.time()
-    for name, home in targets:
-        db_path = Path(home) / "state.db"
-        if not db_path.exists():
-            continue
-        try:
-            # Read-only: this loop runs on every sidebar refresh, so it must
-            # never DDL/write-lock another profile's live DB (see SessionDB
-            # read_only docstring).
-            db = SessionDB(db_path=db_path, read_only=True)
-        except Exception as exc:
-            errors.append({"profile": name, "error": str(exc)})
-            continue
-        try:
-            rows = db.list_sessions_rich(
-                source=source_filter,
-                exclude_sources=exclude_list or None,
-                limit=per_profile,
-                offset=0,
-                min_message_count=min_message_count,
-                include_archived=include_archived,
-                archived_only=archived_only,
-                order_by_last_active=order == "recent",
-                # Same SQL-level blob skip as /api/sessions (see above).
-                compact_rows=not full,
+    for name, _home in targets:
+        logical_name, rows, profile_total, profile_errors = _list_logical_profile_sessions(
+            name,
+            limit=per_profile,
+            offset=0,
+            source=source_filter,
+            exclude_sources=exclude_list or None,
+            cwd_prefix=None,
+            min_message_count=min_message_count,
+            include_archived=include_archived,
+            archived_only=archived_only,
+            order_by_last_active=order == "recent",
+            compact_rows=not full,
+        )
+        total += profile_total
+        profile_totals[logical_name] = profile_total
+        errors.extend({"profile": logical_name, "error": error} for error in profile_errors)
+        for s in rows:
+            s["profile"] = logical_name
+            s["is_default_profile"] = logical_name == "default"
+            s["is_active"] = (
+                s.get("ended_at") is None
+                and (now - s.get("last_active", s.get("started_at", 0))) < 300
             )
-            profile_total = db.session_count(
-                source=source_filter,
-                exclude_sources=exclude_list or None,
-                min_message_count=min_message_count,
-                include_archived=include_archived,
-                archived_only=archived_only,
-                exclude_children=True,
-            )
-            total += profile_total
-            profile_totals[name] = profile_total
-            for s in rows:
-                s["profile"] = name
-                s["is_default_profile"] = name == "default"
-                s["is_active"] = (
-                    s.get("ended_at") is None
-                    and (now - s.get("last_active", s.get("started_at", 0))) < 300
-                )
-                s["archived"] = bool(s.get("archived"))
-                merged.append(s)
-        except Exception as exc:
-            errors.append({"profile": name, "error": str(exc)})
-        finally:
-            db.close()
+            s["archived"] = bool(s.get("archived"))
+            merged.append(s)
 
     sort_key = "last_active" if order == "recent" else "started_at"
     merged.sort(key=lambda s: s.get(sort_key) or s.get("started_at") or 0, reverse=True)
@@ -5044,16 +5110,15 @@ def get_profiles_sessions_sidebar(
     messaging_limit: int = 100,
     messaging_exclude: str = None,
 ):
-    """Batched sidebar session slices — one profile-DB open per refresh.
+    """Batched sidebar session slices across logical profile stores.
 
     The desktop sidebar needs three source-scoped windows per refresh: recents
     (local chats, scoped to the active profile), cron sessions (all profiles),
-    and messaging-platform sessions (all profiles). Served as three separate
-    ``/api/profiles/sessions`` calls they reopened every profile's ``state.db``
-    three times and re-counted each refresh. This opens each DB once and runs
-    the three filtered queries together, returning the three windows in one
-    payload. Read-only and process-light, same row projection and 300s active
-    heuristic as ``/api/profiles/sessions``.
+    and messaging-platform sessions (all profiles). It returns the three
+    windows in one HTTP response and resolves each logical profile across its
+    local store plus any multiplex-gateway partition in the central store.
+    Reads use the same lightweight row projection and 300s active heuristic as
+    ``/api/profiles/sessions``.
 
     The caller passes the source taxonomy (``recents_exclude`` /
     ``messaging_exclude`` CSV, ``source=cron`` is implicit) so this stays
@@ -5061,11 +5126,9 @@ def get_profiles_sessions_sidebar(
     ``min_messages=1`` / ``archived=exclude`` / recency order, matching the
     desktop's per-slice calls.
     """
-    from hermes_state import SessionDB
     from hermes_cli import profiles as profiles_mod
 
     # cron + messaging are cross-profile; recents is scoped to recents_profile.
-    # Scan every profile once regardless (each DB opened a single time).
     try:
         infos = profiles_mod.list_profiles()
         targets: List[Tuple[str, Path]] = [(info.name, info.path) for info in infos]
@@ -5102,50 +5165,41 @@ def get_profiles_sessions_sidebar(
             s["archived"] = bool(s.get("archived"))
         return rows
 
-    def _slice(db, *, source=None, exclude=None, cap):
-        return db.list_sessions_rich(
-            source=source,
-            exclude_sources=exclude or None,
+    def _logical_slice(name: str, *, source=None, exclude=None, cap: int):
+        logical_name, rows, total, slice_errors = _list_logical_profile_sessions(
+            name,
             limit=cap,
             offset=0,
+            source=source,
+            exclude_sources=exclude or None,
+            cwd_prefix=None,
             min_message_count=1,
             include_archived=False,
             archived_only=False,
             order_by_last_active=True,
             compact_rows=True,
         )
+        errors.extend(
+            {"profile": logical_name, "error": error} for error in slice_errors
+        )
+        return logical_name, rows, total
 
-    for name, home in targets:
-        db_path = Path(home) / "state.db"
-        if not db_path.exists():
-            continue
-        try:
-            db = SessionDB(db_path=db_path, read_only=True)
-        except Exception as exc:
-            errors.append({"profile": name, "error": str(exc)})
-            continue
-        try:
-            if recents_scope == "all" or name == recents_scope:
-                recents_rows.extend(
-                    _tag(_slice(db, exclude=recents_exclude_list, cap=recents_cap), name)
-                )
-                rtotal = db.session_count(
-                    exclude_sources=recents_exclude_list or None,
-                    min_message_count=1,
-                    include_archived=False,
-                    archived_only=False,
-                    exclude_children=True,
-                )
-                recents_total += rtotal
-                recents_profile_totals[name] = rtotal
-            cron_rows.extend(_tag(_slice(db, source="cron", cap=cron_cap), name))
-            messaging_rows.extend(
-                _tag(_slice(db, exclude=messaging_exclude_list, cap=messaging_cap), name)
+    for name, _home in targets:
+        if recents_scope == "all" or name == recents_scope:
+            logical_name, rows, rtotal = _logical_slice(
+                name, exclude=recents_exclude_list, cap=recents_cap
             )
-        except Exception as exc:
-            errors.append({"profile": name, "error": str(exc)})
-        finally:
-            db.close()
+            recents_rows.extend(_tag(rows, logical_name))
+            recents_total += rtotal
+            recents_profile_totals[logical_name] = rtotal
+
+        logical_name, rows, _ = _logical_slice(name, source="cron", cap=cron_cap)
+        cron_rows.extend(_tag(rows, logical_name))
+
+        logical_name, rows, _ = _logical_slice(
+            name, exclude=messaging_exclude_list, cap=messaging_cap
+        )
+        messaging_rows.extend(_tag(rows, logical_name))
 
     def _window(rows: List[Dict[str, Any]], cap: int) -> List[Dict[str, Any]]:
         rows.sort(key=lambda s: s.get("last_active") or s.get("started_at") or 0, reverse=True)
@@ -5183,7 +5237,38 @@ async def search_sessions(q: str = "", limit: int = 20, profile: Optional[str] =
     if not q or not q.strip():
         return {"results": []}
     try:
-        db = _open_session_db_for_profile(profile)
+        from hermes_state import SessionDB
+
+        db = None
+        selected_db_path = None
+        selected_profile_filter = None
+        _name, specs = _logical_session_db_specs(profile)
+        # Prefer the multiplex-central partition when it contains rows for the
+        # requested profile; otherwise retain the profile-local search path.
+        # Exact list/detail APIs merge both stores, while search's lineage
+        # projection must run within one SQLite parent graph at a time.
+        for db_path, profile_filter in specs:
+            if not db_path.exists():
+                continue
+            # Search may need to self-heal/rebuild an FTS index, so preserve
+            # the endpoint's historical read-write SessionDB mode here.
+            candidate = SessionDB(db_path=db_path)
+            if candidate.session_count(
+                include_archived=True, profile_name=profile_filter
+            ):
+                db = candidate
+                selected_db_path = db_path
+                selected_profile_filter = profile_filter
+                break
+            candidate.close()
+        if db is None and _name == "default":
+            # Fresh installs have no state.db yet. Preserve the historical
+            # constructor path (and its test seam) so SessionDB can initialise
+            # the default store on first search.
+            db = SessionDB()
+            selected_profile_filter = None
+        if db is None:
+            return {"results": []}
         try:
             safe_limit = max(1, min(int(limit or 20), 100))
 
@@ -5278,7 +5363,12 @@ async def search_sessions(q: str = "", limit: int = 20, profile: Optional[str] =
             # logs, or another Hermes surface. FTS can't find those unless the
             # id happens to appear in message text. search_sessions_by_id is
             # SQL-bounded, so this stays cheap even with thousands of sessions.
-            for row in db.search_sessions_by_id(q, limit=safe_limit, include_archived=True):
+            id_search_kwargs = {}
+            if selected_profile_filter is not None:
+                id_search_kwargs["profile_name"] = selected_profile_filter
+            for row in db.search_sessions_by_id(
+                q, limit=safe_limit, include_archived=True, **id_search_kwargs
+            ):
                 sid = row.get("id")
                 preview = (row.get("preview") or "").strip()
                 snippet = preview or f"Session ID: {sid}"
@@ -5307,7 +5397,12 @@ async def search_sessions(q: str = "", limit: int = 20, profile: Optional[str] =
             # Over-fetch so lineage dedup can still surface `limit` distinct
             # conversations even when several hits collapse onto one root.
             fetch_limit = max(safe_limit * 5, 50)
-            matches = db.search_messages(query=prefix_query, limit=fetch_limit)
+            message_search_kwargs = {}
+            if selected_profile_filter is not None:
+                message_search_kwargs["profile_name"] = selected_profile_filter
+            matches = db.search_messages(
+                query=prefix_query, limit=fetch_limit, **message_search_kwargs
+            )
 
             for m in matches:
                 if len(seen) >= safe_limit:
@@ -5322,6 +5417,70 @@ async def search_sessions(q: str = "", limit: int = 20, profile: Optional[str] =
                         "session_started": m.get("session_started"),
                     },
                 )
+
+            # A named profile can have ordinary CLI/Desktop sessions in its
+            # local DB and multiplex gateway sessions in the central DB. Fill
+            # any remaining result slots from the other store(s), preserving
+            # local-first ordering and the same lineage-dedup contract.
+            primary_db = db
+            for extra_path, extra_filter in specs:
+                if len(seen) >= safe_limit or extra_path == selected_db_path:
+                    continue
+                if not extra_path.exists():
+                    continue
+                extra_db = SessionDB(db_path=extra_path)
+                try:
+                    if not extra_db.session_count(
+                        include_archived=True, profile_name=extra_filter
+                    ):
+                        continue
+                    db = extra_db
+                    root_cache.clear()
+                    tip_cache.clear()
+                    extra_kwargs = (
+                        {"profile_name": extra_filter}
+                        if extra_filter is not None
+                        else {}
+                    )
+                    for row in db.search_sessions_by_id(
+                        q,
+                        limit=safe_limit - len(seen),
+                        include_archived=True,
+                        **extra_kwargs,
+                    ):
+                        sid = row.get("id")
+                        add_lineage_result(
+                            sid,
+                            {
+                                "snippet": (row.get("preview") or "").strip()
+                                or f"Session ID: {sid}",
+                                "role": None,
+                                "source": row.get("source"),
+                                "model": row.get("model"),
+                                "session_started": row.get("started_at"),
+                            },
+                        )
+                    if len(seen) < safe_limit:
+                        for match in db.search_messages(
+                            query=prefix_query,
+                            limit=max((safe_limit - len(seen)) * 5, 50),
+                            **extra_kwargs,
+                        ):
+                            if len(seen) >= safe_limit:
+                                break
+                            add_lineage_result(
+                                match["session_id"],
+                                {
+                                    "snippet": match.get("snippet", ""),
+                                    "role": match.get("role"),
+                                    "source": match.get("source"),
+                                    "model": match.get("model"),
+                                    "session_started": match.get("session_started"),
+                                },
+                            )
+                finally:
+                    extra_db.close()
+                    db = primary_db
             return {"results": list(seen.values())}
         finally:
             db.close()
@@ -11471,11 +11630,16 @@ async def bulk_delete_sessions_endpoint(body: BulkDeleteSessions):
             detail="ids must contain at most 500 entries",
         )
     def _delete() -> int:
-        db = _open_session_db_for_profile(body.profile)
-        try:
-            return db.delete_sessions(body.ids)
-        finally:
-            db.close()
+        deleted = 0
+        for requested_id in dict.fromkeys(body.ids):
+            db, sid = _resolve_logical_session_db(body.profile, requested_id)
+            if db is None:
+                continue
+            try:
+                deleted += int(bool(db.delete_session(sid)))
+            finally:
+                db.close()
+        return deleted
 
     deleted = await asyncio.to_thread(_delete)
     return {"ok": True, "deleted": deleted}
@@ -11516,11 +11680,19 @@ async def count_empty_sessions_endpoint(profile: Optional[str] = None):
     that does nothing. Cheap, single-COUNT query.
     """
     def _count() -> int:
-        db = _open_session_db_for_profile(profile)
-        try:
-            return db.count_empty_sessions()
-        finally:
-            db.close()
+        from hermes_state import SessionDB
+
+        count = 0
+        _name, specs = _logical_session_db_specs(profile)
+        for db_path, profile_filter in specs:
+            if not db_path.exists():
+                continue
+            db = SessionDB(db_path=db_path, read_only=True)
+            try:
+                count += db.count_empty_sessions(profile_name=profile_filter)
+            finally:
+                db.close()
+        return count
 
     return {"count": await asyncio.to_thread(_count)}
 
@@ -11546,11 +11718,19 @@ async def delete_empty_sessions_endpoint(profile: Optional[str] = None):
     the two delete endpoints' DB-vs-disk behaviour consistent.
     """
     def _delete() -> int:
-        db = _open_session_db_for_profile(profile)
-        try:
-            return db.delete_empty_sessions()
-        finally:
-            db.close()
+        from hermes_state import SessionDB
+
+        deleted = 0
+        _name, specs = _logical_session_db_specs(profile)
+        for db_path, profile_filter in specs:
+            if not db_path.exists():
+                continue
+            db = SessionDB(db_path=db_path)
+            try:
+                deleted += db.delete_empty_sessions(profile_name=profile_filter)
+            finally:
+                db.close()
+        return deleted
 
     deleted = await asyncio.to_thread(_delete)
     return {"ok": True, "deleted": deleted}
@@ -11563,28 +11743,43 @@ async def get_session_stats(profile: Optional[str] = None):
     Registered before ``/api/sessions/{session_id}`` so the literal ``stats``
     path isn't captured as a session id by the parameterized route.
     """
-    db = _open_session_db_for_profile(profile)
-    try:
-        total = db.session_count(include_archived=True)
-        active_store = db.session_count(include_archived=False)
-        archived = db.session_count(archived_only=True)
-        messages = db.message_count()
-        by_source: Dict[str, int] = {}
+    from hermes_state import SessionDB
+
+    _name, specs = _logical_session_db_specs(profile)
+    total = active_store = archived = messages = 0
+    by_source: Dict[str, int] = {}
+    for db_path, profile_filter in specs:
+        if not db_path.exists():
+            continue
+        db = SessionDB(db_path=db_path, read_only=True)
         try:
-            for s in db.list_sessions_rich(limit=10000, include_archived=True, compact_rows=True):
+            total += db.session_count(include_archived=True, profile_name=profile_filter)
+            active_store += db.session_count(
+                include_archived=False, profile_name=profile_filter
+            )
+            archived += db.session_count(
+                archived_only=True, profile_name=profile_filter
+            )
+            messages += db.message_count(profile_name=profile_filter)
+            for s in db.list_sessions_rich(
+                limit=10000,
+                include_archived=True,
+                compact_rows=True,
+                profile_name=profile_filter,
+            ):
                 src = str(s.get("source") or "cli")
                 by_source[src] = by_source.get(src, 0) + 1
         except Exception:
             pass
-        return {
-            "total": total,
-            "active_store": active_store,
-            "archived": archived,
-            "messages": messages,
-            "by_source": by_source,
-        }
-    finally:
-        db.close()
+        finally:
+            db.close()
+    return {
+        "total": total,
+        "active_store": active_store,
+        "archived": archived,
+        "messages": messages,
+        "by_source": by_source,
+    }
 
 
 def _open_session_db_for_profile(profile: Optional[str]):
@@ -11600,6 +11795,36 @@ def _open_session_db_for_profile(profile: Optional[str]):
         return SessionDB()
     _name, home = _cron_profile_home(profile)
     return SessionDB(db_path=Path(home) / "state.db")
+
+
+def _resolve_logical_session_db(
+    profile: Optional[str],
+    session_id: str,
+    *,
+    read_only: bool = False,
+):
+    """Open the store containing ``session_id`` within a logical profile.
+
+    Local profile storage wins over the multiplex gateway's central partition
+    when duplicate ids exist.  Central rows are always ownership-filtered.
+    The caller owns and must close the returned DB.
+    """
+    from hermes_state import SessionDB
+
+    _name, specs = _logical_session_db_specs(profile)
+    for db_path, profile_filter in specs:
+        if not db_path.exists():
+            continue
+        db = SessionDB(db_path=db_path, read_only=read_only)
+        try:
+            sid = db.resolve_session_id(session_id, profile_name=profile_filter)
+        except Exception:
+            db.close()
+            raise
+        if sid:
+            return db, sid
+        db.close()
+    return None, None
 
 
 # In-process throttle for the opportunistic auto-archive trigger, keyed by
@@ -11669,10 +11894,11 @@ async def _auto_archive_ticker_loop(
 
 @app.get("/api/sessions/{session_id}")
 async def get_session_detail(session_id: str, profile: Optional[str] = None):
-    db = _open_session_db_for_profile(profile)
+    db, sid = _resolve_logical_session_db(profile, session_id, read_only=True)
+    if db is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     try:
-        sid = db.resolve_session_id(session_id)
-        session = db.get_session(sid) if sid else None
+        session = db.get_session(sid)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         if profile:
@@ -11689,9 +11915,11 @@ async def get_session_latest_descendant(
     profile: Optional[str] = None,
 ):
     def _lookup():
-        db = _open_session_db_for_profile(profile)
+        db, sid = _resolve_logical_session_db(profile, session_id, read_only=True)
+        if db is None:
+            return None, []
         try:
-            return _session_latest_descendant(session_id, db)
+            return _session_latest_descendant(sid, db)
         finally:
             db.close()
 
@@ -11713,11 +11941,10 @@ async def get_session_messages(
     offset: int = 0,
 ):
     def _read():
-        db = _open_session_db_for_profile(profile)
+        db, sid = _resolve_logical_session_db(profile, session_id, read_only=True)
+        if db is None:
+            return None
         try:
-            sid = db.resolve_session_id(session_id)
-            if not sid:
-                return None
             sid = db.resolve_resume_session_id(sid)
             # Clamp limit to prevent abuse (max 500 per page)
             _limit = min(limit, 500) if limit is not None else None
@@ -11746,7 +11973,9 @@ async def delete_session_endpoint(session_id: str, profile: Optional[str] = None
     # opening its state.db directly. Remote profiles never reach here — the
     # desktop routes their DELETE to the remote backend. Omit for current/default.
     def _delete():
-        db = _open_session_db_for_profile(profile)
+        db, sid = _resolve_logical_session_db(profile, session_id)
+        if db is None:
+            return {"ok": True, "already_absent": True}
         try:
             # Resolve exact ids / unique prefixes like every other session endpoint
             # (detail, messages, rename, export all do). A session that no longer
@@ -11757,9 +11986,6 @@ async def delete_session_endpoint(session_id: str, profile: Optional[str] = None
             # leaves transient empty rows (reaped by empty-session hygiene) that
             # race the sidebar snapshot, which is exactly when this fired. Mirrors
             # the bulk-delete endpoint, which already treats ghost ids as success.
-            sid = db.resolve_session_id(session_id)
-            if not sid:
-                return {"ok": True, "already_absent": True}
             db.delete_session(sid)
             return {"ok": True}
         finally:
@@ -11788,11 +12014,10 @@ async def rename_session_endpoint(session_id: str, body: SessionRename):
     session from the auto-archive sweep). Any field may be omitted. ``profile``
     targets another profile's session.
     """
-    db = _open_session_db_for_profile(body.profile)
+    db, sid = _resolve_logical_session_db(body.profile, session_id)
+    if db is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     try:
-        sid = db.resolve_session_id(session_id)
-        if not sid:
-            raise HTTPException(status_code=404, detail="Session not found")
         if body.title is None and body.archived is None and body.pinned is None:
             raise HTTPException(
                 status_code=400,
@@ -11822,10 +12047,11 @@ async def rename_session_endpoint(session_id: str, body: SessionRename):
 async def export_session_endpoint(session_id: str, profile: Optional[str] = None):
     """Export a single session (metadata + messages) as JSON."""
     def _export():
-        db = _open_session_db_for_profile(profile)
+        db, sid = _resolve_logical_session_db(profile, session_id, read_only=True)
+        if db is None:
+            return None
         try:
-            sid = db.resolve_session_id(session_id)
-            return db.export_session(sid) if sid else None
+            return db.export_session(sid)
         finally:
             db.close()
 
