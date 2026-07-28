@@ -2,8 +2,8 @@
 id: "0018"
 title: Phạm vi của session_search
 type: grilling
-status: open
-assignee: ""
+status: closed
+assignee: "codex"
 blocked_by: []
 ---
 
@@ -69,3 +69,37 @@ Lọc theo người phải thêm tham số vào `search_messages` + `_search_mes
 trigram + nhánh CJK — **bốn chỗ trong `hermes_state.py`**, file lõi 8000+ dòng, đắt hơn
 adapter nhiều. Cộng thêm: cùng một người đang tồn tại dưới **hai** `user_id`
 (`1d13c1ff` tenant-scoped và `ou_d8ae…` open_id), nên bộ lọc phải xử lý cả hai dạng.
+
+## Resolution — 2026-07-28
+
+**Chọn (b), nhưng tách semantics theo loại hội thoại:**
+
+- DM: cùng platform + cùng profile + cùng principal. Principal là giao của `user_id` và
+  `user_id_alt`; Feishu dùng stable `union_id` trong `user_id_alt`, nên đổi giữa các dạng
+  tenant/open ID không làm Khánh mất recall của chính Khánh.
+- Group/channel/topic: chỉ exact `chat_id` + `thread_id`. Người trong cùng topic chia sẻ
+  context của topic đó; topic khác không được search chéo.
+- Messaging runtime không được chọn profile khác. `profile` đã bị gỡ khỏi model schema;
+  cả `profile=` lẫn link embedded `profile/id` đều bị từ chối trước khi mở DB khác.
+- CLI/admin direct calls giữ hành vi cũ. Boundary chỉ được bật bởi hai agent execution
+  path qua trusted `enforce_scope=True`; model không điều khiển cờ này.
+- Thiếu active session, thiếu row hoặc gateway identity hỏng thì fail closed. Không fallback
+  scan profile khác khi boundary đang bật.
+
+Implementation đi theo ba seam:
+
+1. `hermes_state.py` schema v24 lưu `user_id_alt`, backfill từ `origin_json`, giữ identity
+   qua conflict enrichment/compression và áp scope vào FTS, CJK, trigram, LIKE, Latin
+   fallback, deferred-gap scan và browse (`e9e41852d`).
+2. `session_search` kiểm ownership cho discover/browse/read/scroll và bỏ profile khỏi model
+   surface (`263f051e3`).
+3. Gateway + lazy agent-session creation persist đủ `user_id`, `user_id_alt`, session/chat/
+   thread metadata; cả hai runtime tool path ép scope (`706736351`).
+
+Evidence: 728 focused tests pass với writable temporary `HERMES_HOME`, gồm positive recall
+của cùng principal, negative cross-principal/cross-topic/cross-profile, malformed metadata,
+CJK/trigram/LIKE/Latin fallback, migration và gateway persistence. Compile và Ruff pass.
+
+Tripwire cũ đã được giải ở code boundary. Chỉ được thêm user thứ hai sau khi deploy ba
+commit trên vào pilot và chạy canary hai principal thật; việc thêm allowlist không nằm trong
+ticket này. Automatic memory và skill learning không bị sửa bởi thay đổi này.

@@ -84,6 +84,10 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
 - [Absorb vault-policy và nối pilot Hermes](tickets/0026-absorb-vault-policy-va-noi-pilot-hermes.md) —
   production stdio seam expose đúng một policy tool; locked E2E + Docker negative probe
   pass, và Feishu DM live canary gọi vault warm `0.07–0.24s` rồi trả cited response.
+- [Phạm vi của session_search](tickets/0018-pham-vi-cua-session-search.md) — DM recall theo
+  principal ổn định trong cùng platform/profile; group recall chỉ exact chat/topic;
+  messaging runtime fail closed và không còn model-controlled cross-profile read. Memory
+  và skill learning độc lập, không bị tắt.
 
 ## Fog
 
