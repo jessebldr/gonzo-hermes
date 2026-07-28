@@ -91,6 +91,7 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `docs/wayfinder/tickets/0004-lark-openapi-mcp-co-dung-duoc-khong.md` | Đóng Gate 0 premise bằng primary-source report pinned upstream SHA | ticket này |
 | `docs/wayfinder/tickets/0020-sua-ba-cho-sai-trong-doc-kien-truc.md` | Thêm correction D-10/Gate 0 đã được research chứng minh | pending — doc reconciliation |
 | `docs/wayfinder/tickets/0027-implement-lark-io-broker-capability-boundary.md` | Task implement direct-SDK capability/idempotency boundary cho workstream ③ | ticket này |
+| `docs/wayfinder/tickets/0028-onboard-principal-thu-hai-va-canary-cach-ly.md` | Tách gate vận hành hai principal thật khỏi các canary một người đã đóng | ticket này |
 | `hermes_state.py` | Schema v24 lưu alternate principal ID và áp recall scope vào toàn bộ browse/FTS/CJK/trigram/LIKE/fallback paths; preserve alias khi gateway update thiếu trường | `e9e41852d`, `1da2e470b` |
 | `tests/test_hermes_state.py` | Pin migration, principal scope, identity inheritance qua compression và preserve-on-NULL | `e9e41852d`, `1da2e470b` |
 | `tests/test_fts_cjk_bigram.py` | Pin recall scope trên CJK và Latin fallback indexes | `e9e41852d` |
