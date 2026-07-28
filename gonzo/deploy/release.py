@@ -94,16 +94,16 @@ def install_launchd_plist(
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     if plist_path.exists():
         shutil.copy2(plist_path, backup)
-        subprocess.run([launchctl, "bootout", launchd_domain, str(plist_path)], check=False)
+        subprocess.run([launchctl, "bootout", f"{launchd_domain}/ai.hermes.gateway"], check=False)
     temporary = plist_path.with_suffix(plist_path.suffix + ".tmp")
     temporary.write_bytes(payload)
     temporary.replace(plist_path)
     try:
-        subprocess.run([launchctl, "bootstrap", launchd_domain, str(plist_path)], check=True)
+        subprocess.run([launchctl, "load", str(plist_path)], check=True)
     except Exception:
         if backup.exists():
             shutil.copy2(backup, plist_path)
-            subprocess.run([launchctl, "bootstrap", launchd_domain, str(plist_path)], check=False)
+            subprocess.run([launchctl, "load", str(plist_path)], check=False)
         raise
     return backup if backup.exists() else None
 
@@ -122,9 +122,9 @@ def rollback_launchd_plist(
         return False
     if dry_run:
         return True
-    subprocess.run([launchctl, "bootout", launchd_domain, str(plist_path)], check=False)
+    subprocess.run([launchctl, "bootout", f"{launchd_domain}/ai.hermes.gateway"], check=False)
     shutil.copy2(backup, plist_path)
-    subprocess.run([launchctl, "bootstrap", launchd_domain, str(plist_path)], check=True)
+    subprocess.run([launchctl, "load", str(plist_path)], check=True)
     return True
 
 
