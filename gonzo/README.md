@@ -74,7 +74,9 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `gateway/config.py` | Mở schema/doc config profile route cho `principal_id` và `chat_type` | `486256633` |
 | `gateway/platforms/base.py` | Khai báo runner back-reference cho mọi adapter để inbound profile routing không còn Discord-only | `486256633` |
 | `gateway/profile_routing.py` | Route DM theo stable principal, normalize chat type và giữ principal route khỏi group/topic | `486256633` |
+| `gateway/authz_mixin.py` | Cho lớp authorization thứ hai match cùng tập sender identity (`user_id` + stable `user_id_alt`) mà adapter admission, profile routing và session keying đã dùng; sửa DM Feishu có typing rồi bị drop khi allowlist lưu `union_id` | commit này |
 | `gateway/run.py` | Truyền principal/chat type vào matcher và resolve đúng profile home dưới multiplex gate | `486256633` |
+| `tests/gateway/test_unauthorized_dm_behavior.py` | Pin Feishu `union_id` hợp lệ qua gateway auth và giữ negative canary cho union ID lạ | commit này |
 | `tests/gateway/test_profile_resolution.py` | E2E adapter → route → profile home → profile-scoped session namespace trên temporary `HERMES_HOME` | `486256633` |
 | `tests/gateway/test_profile_routing.py` | Pin specificity, DM-only principal matching, chat-type fallback và config parsing | `486256633` |
 | `website/docs/user-guide/multi-profile-gateways.md` | Document one-gateway principal/workspace/shared-group topology | `486256633` |

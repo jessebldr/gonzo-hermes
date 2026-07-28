@@ -399,7 +399,13 @@ class GatewayAuthorizationMixin:
         ):
             return True
 
-        user_id = source.user_id
+        identity_ids = tuple(
+            dict.fromkeys(
+                str(value)
+                for value in (source.user_id, source.user_id_alt)
+                if value
+            )
+        )
 
         # Telegram (and similar) authorize entire group/forum/channel chats
         # by chat ID via TELEGRAM_GROUP_ALLOWED_CHATS / QQ_GROUP_ALLOWED_USERS.
@@ -462,7 +468,7 @@ class GatewayAuthorizationMixin:
             if allow_bots_var and os.getenv(allow_bots_var, "none").lower().strip() in {"mentions", "all"}:
                 return True
 
-        if not user_id:
+        if not identity_ids:
             return False
 
         platform_env_map = {
@@ -555,7 +561,10 @@ class GatewayAuthorizationMixin:
         # the source has no profile or the profile isn't registered.
         platform_name = source.platform.value if source.platform else ""
         pairing_store = self._pairing_store_for(source)
-        if pairing_store is not None and pairing_store.is_approved(platform_name, user_id):
+        if pairing_store is not None and any(
+            pairing_store.is_approved(platform_name, identity_id)
+            for identity_id in identity_ids
+        ):
             return True
 
         # Check platform-specific and global allowlists
@@ -626,7 +635,9 @@ class GatewayAuthorizationMixin:
                     adapter_allow = extra.get("allow_from")
                 if adapter_allow:
                     allowed = _coerce_allow_set(adapter_allow)
-                    if user_id in allowed or "*" in allowed:
+                    if "*" in allowed or any(
+                        identity_id in allowed for identity_id in identity_ids
+                    ):
                         return True
             # No allowlists configured -- check global allow-all flag
             return _auth_env("GATEWAY_ALLOW_ALL_USERS").lower() in {"true", "1", "yes"}
@@ -688,9 +699,16 @@ class GatewayAuthorizationMixin:
         if "*" in allowed_ids:
             return True
 
-        check_ids = {user_id}
-        if "@" in user_id:
-            check_ids.add(user_id.split("@")[0])
+        # SessionSource may carry more than one legitimate sender identity.
+        # Feishu, for example, uses tenant/app-scoped ``user_id`` as primary
+        # and the developer-scoped stable ``union_id`` as ``user_id_alt``;
+        # Signal similarly carries its stable UUID as the alternate identity.
+        # Adapter admission and session keying already recognize these IDs, so
+        # the gateway's second authorization layer must compare the same set.
+        check_ids = set(identity_ids)
+        for identity_id in identity_ids:
+            if "@" in identity_id:
+                check_ids.add(identity_id.split("@")[0])
 
         # WhatsApp: resolve phone↔LID aliases from bridge session mapping files
         if source.platform == Platform.WHATSAPP:
@@ -700,10 +718,11 @@ class GatewayAuthorizationMixin:
             if normalized_allowed_ids:
                 allowed_ids = normalized_allowed_ids
 
-            check_ids.update(_expand_whatsapp_auth_aliases(user_id))
-            normalized_user_id = _normalize_whatsapp_identifier(user_id)
-            if normalized_user_id:
-                check_ids.add(normalized_user_id)
+            for identity_id in identity_ids:
+                check_ids.update(_expand_whatsapp_auth_aliases(identity_id))
+                normalized_user_id = _normalize_whatsapp_identifier(identity_id)
+                if normalized_user_id:
+                    check_ids.add(normalized_user_id)
 
         # SimpleX: SIMPLEX_ALLOWED_USERS accepts either the numeric contactId
         # or the contact's display name. The adapter sets user_id=contactId for

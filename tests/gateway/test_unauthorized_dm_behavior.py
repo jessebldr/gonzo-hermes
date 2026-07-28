@@ -279,6 +279,56 @@ def test_star_wildcard_works_for_any_platform(monkeypatch):
     assert runner._is_user_authorized(source) is True
 
 
+def test_feishu_allowlist_accepts_stable_union_id(monkeypatch):
+    """Feishu authorization must accept the stable union_id carried as user_id_alt.
+
+    Feishu's tenant-scoped ID is the primary ``user_id`` while the stable
+    cross-tenant union_id is carried as ``user_id_alt``.  Gonzo profile routing
+    and adapter admission intentionally key principals on that stable identity,
+    so the gateway's second authorization layer must recognize the same ID.
+    """
+    _clear_auth_env(monkeypatch)
+
+    runner, _adapter = _make_runner(
+        Platform.FEISHU,
+        GatewayConfig(platforms={Platform.FEISHU: PlatformConfig(enabled=True)}),
+    )
+    monkeypatch.setattr("agent.secret_scope.get_secret", lambda _name: None)
+    monkeypatch.setenv("FEISHU_ALLOWED_USERS", "union-owner")
+    source = SessionSource(
+        platform=Platform.FEISHU,
+        user_id="tenant-owner",
+        user_id_alt="union-owner",
+        chat_id="dm-chat",
+        user_name="owner",
+        chat_type="dm",
+    )
+
+    assert runner._is_user_authorized(source) is True
+
+
+def test_feishu_allowlist_rejects_unlisted_union_id(monkeypatch):
+    """An unrelated Feishu union_id must remain unauthorized."""
+    _clear_auth_env(monkeypatch)
+
+    runner, _adapter = _make_runner(
+        Platform.FEISHU,
+        GatewayConfig(platforms={Platform.FEISHU: PlatformConfig(enabled=True)}),
+    )
+    monkeypatch.setattr("agent.secret_scope.get_secret", lambda _name: None)
+    monkeypatch.setenv("FEISHU_ALLOWED_USERS", "union-owner")
+    source = SessionSource(
+        platform=Platform.FEISHU,
+        user_id="tenant-stranger",
+        user_id_alt="union-stranger",
+        chat_id="dm-chat",
+        user_name="stranger",
+        chat_type="dm",
+    )
+
+    assert runner._is_user_authorized(source) is False
+
+
 def test_qq_group_allowlist_authorizes_group_chat_without_user_allowlist(monkeypatch):
     _clear_auth_env(monkeypatch)
     monkeypatch.setenv("QQ_GROUP_ALLOWED_USERS", "group-openid-1")
