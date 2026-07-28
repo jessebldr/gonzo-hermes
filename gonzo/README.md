@@ -87,6 +87,10 @@ Danh sách này ngắn là một mục tiêu, không phải tình cờ.
 | `docs/wayfinder/tickets/0014-markdown-vault-mcp-adopt-hay-tu-viet.md` | Chốt adopt có điều kiện private index engine, không expose MCP surface upstream | ticket này |
 | `docs/wayfinder/tickets/0025-chung-minh-markdown-vault-mcp-sau-vault-policy.md` | Prototype gate trước khi giữ dependency index cho Gate 3 | ticket này |
 | `docs/wayfinder/tickets/0026-absorb-vault-policy-va-noi-pilot-hermes.md` | Absorb read-only policy seam, deploy stdio MCP hẹp và ghi runtime canary của pilot | ticket này |
+| `docs/research/lark-openapi-mcp-assessment.md` | Verify repo/license/Base/card primitives và chốt direct official SDK sau D-20 broker thay vì generic MCP surface | pending — Lark MCP research |
+| `docs/wayfinder/tickets/0004-lark-openapi-mcp-co-dung-duoc-khong.md` | Đóng Gate 0 premise bằng primary-source report pinned upstream SHA | ticket này |
+| `docs/wayfinder/tickets/0020-sua-ba-cho-sai-trong-doc-kien-truc.md` | Thêm correction D-10/Gate 0 đã được research chứng minh | pending — doc reconciliation |
+| `docs/wayfinder/tickets/0027-implement-lark-io-broker-capability-boundary.md` | Task implement direct-SDK capability/idempotency boundary cho workstream ③ | ticket này |
 | `hermes_state.py` | Schema v24 lưu alternate principal ID và áp recall scope vào toàn bộ browse/FTS/CJK/trigram/LIKE/fallback paths; preserve alias khi gateway update thiếu trường | `e9e41852d`, `1da2e470b` |
 | `tests/test_hermes_state.py` | Pin migration, principal scope, identity inheritance qua compression và preserve-on-NULL | `e9e41852d`, `1da2e470b` |
 | `tests/test_fts_cjk_bigram.py` | Pin recall scope trên CJK và Latin fallback indexes | `e9e41852d` |

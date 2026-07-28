@@ -88,6 +88,9 @@ Muốn bác một D-xx thì bác thẳng bằng bằng chứng, đừng bác b�
   principal ổn định trong cùng platform/profile; group recall chỉ exact chat/topic;
   messaging runtime fail closed và không còn model-controlled cross-profile read. Memory
   và skill learning độc lập, không bị tắt.
+- [lark-openapi-mcp có dùng được không](tickets/0004-lark-openapi-mcp-co-dung-duoc-khong.md) —
+  repo official + MIT và phủ Base/card outbound, nhưng Beta/maintenance nguội và không có
+  capability/idempotency/inbound boundary; production broker gọi direct official SDK.
 
 ## Fog
 
