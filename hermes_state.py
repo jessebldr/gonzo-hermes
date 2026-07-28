@@ -3594,7 +3594,8 @@ class SessionDB:
         def _do(conn):
             conn.execute(
                 """UPDATE sessions
-                   SET session_key = ?, source = ?, user_id = ?, user_id_alt = ?, chat_id = ?,
+                   SET session_key = ?, source = ?, user_id = ?,
+                       user_id_alt = COALESCE(?, user_id_alt), chat_id = ?,
                        chat_type = ?, thread_id = ?,
                        display_name = COALESCE(?, display_name),
                        origin_json = COALESCE(?, origin_json)

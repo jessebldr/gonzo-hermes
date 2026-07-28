@@ -6998,6 +6998,25 @@ def test_gateway_metadata_display_name_origin_round_trip(db):
     assert row["display_name"] == "Alice"
     assert json.loads(row["origin_json"])["chat_name"] == "Alice"
 
+    db.record_gateway_session_peer(
+        "gw-meta",
+        source="telegram",
+        user_id="u1",
+        user_id_alt="stable-u1",
+        session_key="agent:main:telegram:dm:c1",
+        chat_id="c1",
+        chat_type="dm",
+    )
+    db.record_gateway_session_peer(
+        "gw-meta",
+        source="telegram",
+        user_id="u1",
+        session_key="agent:main:telegram:dm:c1",
+        chat_id="c1",
+        chat_type="dm",
+    )
+    assert db.get_session("gw-meta")["user_id_alt"] == "stable-u1"
+
     # None values must not clobber existing metadata.
     db.record_gateway_session_peer(
         "gw-meta",
